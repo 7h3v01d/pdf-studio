@@ -1,6 +1,7 @@
-# Professional PDF Reader
+# PDF Reader Pro
 
-Modern, feature-rich PDF viewer and lightweight editor built with **Python** + **PyQt6** + **PyMuPDF (fitz)**.
+A professional PDF reader and editor built with Python and PyQt6.  
+Developed by **Leon** @ **KeystoneAI**.
 
 ---
 
@@ -20,125 +21,104 @@ Use of this software constitutes acceptance of the terms defined in **LICENSE.tx
 
 ---
 
-Clean interface · Continuous / Single page view · Form filling · Text search · Annotations · Page management · Dark mode · Zoom modes · Print support
+## Features
 
-<p align="center">
-  <img src="https://placehold.co/800x500/2d3748/ffffff/png?text=PDF+Reader+Screenshot+(replace+with+real+one)" alt="Main window" width="70%"/>
-  <br/>
-  <em>Screenshot of the application (add real screenshot later)</em>
-</p>
+- **Open & View** — single-page and continuous scroll view modes, fit-width/fit-page zoom, rotate, dark mode, full-screen
+- **Navigation** — page thumbnails, table of contents (TOC), bookmarks, page jump, keyboard shortcuts
+- **Search** — full-text search with next/previous result navigation
+- **Annotations** — sticky notes, highlights, underlines, strikethrough, freehand drawing, eraser
+- **Signatures & Stamps** — draw and place a handwritten signature; insert text stamps
+- **Redactions** — mark and permanently apply redactions
+- **Form Filling** — interact with PDF form fields (text, checkboxes, dropdowns) directly in the viewer
+- **Page Management** — add blank pages, remove pages, reorder via drag-and-drop thumbnails or move up/down
+- **Merge & Split** — merge multiple PDFs or split a PDF into separate files
+- **Extract Pages** — extract a range or selection of pages to a new PDF
+- **Password Protection** — open password-protected PDFs; encrypt saved PDFs with AES-256, set open/permissions passwords and granular permission flags
+- **Print** — send the current document to any system printer
+- **Metadata Viewer** — inspect document properties
+- **Recent Files** — quick-open menu for the last 10 opened files
+- **Annotations Panel** — sidebar listing all annotations across the document with jump-to and delete actions
 
 ---
 
-## ✨ Features
+## Project Structure
 
-- **Viewing modes**
-  - Single page
-  - Continuous scrolling
-- **Navigation**
-  - Thumbnail sidebar
-  - Table of Contents (TOC) sidebar
-  - Go to page + mouse wheel page turning (single-page mode)
-- **Viewing controls**
-  - Zoom (50–400% + Fit Width / Fit Page)
-  - Rotate page
-  - Dark / Light mode for reading area
-- **Search**
-  - Text search with prev/next result navigation
-  - Highlights matching regions
-- **Interactive forms**
-  - Fillable PDF form support (text fields)
-- **Annotations**
-  - Add red text notes (click to place)
-  - Delete annotations (right-click)
-  - Persistent annotations (saved to `.annotations.json`)
-- **Page management**
-  - Add blank page
-  - Remove current page
-  - Reorder pages (drag thumbnails or use buttons)
-  - Move page up/down
-- **Other**
-  - Document properties / metadata viewer
-  - Print selected pages or all
-  - Save modified PDF (with annotations baked in)
-  - Copy selected text (Ctrl+C)
+```
+pdf_reader.py            # Entry point — launches the application
+pdf_reader_app.py        # Core application logic (PDFReader class)
+pdf_reader_ui.py         # All UI construction (menus, toolbars, panels)
+pdf_utils.py             # Utility functions (search, page ops, annotation I/O)
+pdf_scroll_area.py       # Custom QScrollArea (wheel zoom + page-flip)
+pdf_page_widget.py       # Custom QLabel for page rendering with form-field support
+annotations_panel.py     # Sidebar panel listing all annotations
+password_dialog.py       # Password prompt and encryption settings dialogs
+signature_dialog.py      # Draw-your-own signature dialog
+merge_split_dialog.py    # Merge / split PDF dialog
+extract_pages_dialog.py  # Extract pages dialog
+about_dialog.py          # About / keyboard shortcuts dialog
+icon.ico                 # Application icon
+```
 
-## 📸 Screenshots
+---
 
-_(Add 3–5 screenshots here later – toolbar, continuous mode, form filling, annotations, dark mode, etc.)_
+## Requirements
 
-| Single Page Mode              | Continuous Mode               | Form Filling                  |
-|-------------------------------|-------------------------------|-------------------------------|
-| ![](screenshots/single.png)   | ![](screenshots/continuous.png) | ![](screenshots/form.png)     |
+- Python 3.10+
+- See `requirements.txt`
 
-## 🚀 Quick Start
+---
 
-### 1. Prerequisites
+## Installation
 
-- Python **3.9** – **3.12** recommended
-- Operating System: Windows / macOS / Linux
-
-### 2. Install dependencies
-
-#### Recommended: use a virtual environment
 ```bash
+# 1. Clone or download the project
+git clone https://github.com/your-username/pdf-reader-pro.git
+cd pdf-reader-pro
+
+# 2. (Recommended) Create a virtual environment
 python -m venv venv
-```
-```bash
-source venv/bin/activate      # Linux/macOS
-```
- or
-```bash
-venv\Scripts\activate         # Windows
-```
-```bash
+source venv/bin/activate        # macOS / Linux
+venv\Scripts\activate           # Windows
+
+# 3. Install dependencies
 pip install -r requirements.txt
 ```
-requirements.txt example:
-```text
-PyQt6>=6.6.0
-PyMuPDF>=1.23.0     # fitz
-```
-3. Run the application
-```Bash
+
+---
+
+## Running
+
+```bash
 python pdf_reader.py
 ```
-or (most common way)
-```Bash
-python -m pdf_reader
-```
-### 🛠️ Project Structure
-```text
-textpdf-reader/
-├── pdf_reader.py           # Entry point
-├── pdf_reader_app.py       # Main logic & window class
-├── pdf_reader_ui.py        # UI layout & widgets
-├── pdf_utils.py            # Search, annotations, page ops, thumbnails…
-├── pdf_scroll_area.py      # Custom scroll area with wheel navigation
-├── pdf_page_widget.py      # QLabel subclass that repositions form fields
-└── requirements.txt
-```
 
-### ⌨️ Keyboard Shortcuts
-```text
-Action                  Shortcut
-Zoom in                 Ctrl + + / Ctrl + =
-Zoom out                Ctrl + -
-Focus search bar        Ctrl + F
-Copy selected text      Ctrl + C
-(more to come…)
-```
-### ⚡ To-Do / Planned Features
+---
 
--  Highlight & copy text (currently only basic selection rectangle)
-- Better annotation types (highlight, underline, strikethrough, drawing)
-- Undo/redo for annotations & page changes
-- Save annotations inside the PDF (not only .json sidecar)
-- Export pages as images
-- Bookmark support
-- Night mode with real color inversion (not just background)
-- Command line mode / open file from argument
-- PyInstaller / cx_Freeze one-file executable builds
+## Keyboard Shortcuts
+
+| Shortcut | Action |
+|---|---|
+| `Ctrl+O` | Open file |
+| `Ctrl+S` | Save |
+| `Ctrl+Shift+S` | Save As |
+| `Ctrl+P` | Print |
+| `Ctrl+Q` | Quit |
+| `← / →` | Previous / next page |
+| `Ctrl+Home` | First page |
+| `Ctrl+End` | Last page |
+| `Ctrl++ / Ctrl+-` | Zoom in / out |
+| `Ctrl+Wheel` | Zoom in / out |
+| `Ctrl+Shift+H` | Fit width |
+| `Ctrl+Shift+F` | Fit page |
+| `Ctrl+R` | Rotate 90° |
+| `F11` | Toggle full screen |
+| `F4` | Toggle navigation panel |
+| `Ctrl+F` | Focus search box |
+| `Ctrl+C` | Copy selected text |
+| `Ctrl+B` | Add bookmark |
+| `Escape` | Cancel active tool |
+
+---
 
 ## Contribution Policy
 
