@@ -21,6 +21,8 @@ Use of this software constitutes acceptance of the terms defined in **LICENSE.tx
 
 ---
 
+<img width="1920" height="1040" alt="screenshot" src="https://github.com/user-attachments/assets/68ecd064-ea6b-46de-be4c-964fd76079eb" />
+
 ## Features
 
 - **Open & View** — single-page and continuous scroll view modes, fit-width/fit-page zoom, rotate, dark mode, full-screen
