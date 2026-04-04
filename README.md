@@ -1,4 +1,4 @@
-# PDF Reader Pro
+# PDF Reader Pro v2.5
 
 A professional PDF reader and editor built with Python and PyQt6.  
 Developed by **Leon** @ **KeystoneAI**.
