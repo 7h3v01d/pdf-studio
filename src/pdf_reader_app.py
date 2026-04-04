@@ -20,6 +20,7 @@ from PyQt6.QtPrintSupport import QPrinter, QPrintDialog
 
 from pdf_reader_ui import PDFReaderUI
 from password_dialog import PasswordPromptDialog, PasswordProtectDialog
+from undo_stack import UndoStack, Command
 from pdf_utils import (
     load_annotations, save_annotations, load_bookmarks, save_bookmarks,
     search_text, next_search_result, prev_search_result,
@@ -107,10 +108,56 @@ class PDFReader(PDFReaderUI):
         # ── Bookmarks ────────────────────────────────────────────────────
         self.bookmarks = []   # list of {page, label}
 
+        # ── Undo / Redo ───────────────────────────────────────────────────
+        self._undo_stack = UndoStack()
+
+        # Wrap push so any undoable change marks the doc as modified
+        _orig_push = self._undo_stack.push
+        def _push_and_mark(cmd):
+            _orig_push(cmd)
+            self._mark_modified()
+        self._undo_stack.push = _push_and_mark
+
+        # ── Form dirty tracking ───────────────────────────────────────────
+        self._form_dirty = False
+
         # ── Recent files ─────────────────────────────────────────────────
         self.settings    = QSettings("PyCentricStudio", "PDFReaderPro")
         self.recent_files = self._load_recent_files()
         self._build_recent_menu()
+
+        # ── Restore window geometry ───────────────────────────────────────
+        geom = self.settings.value("window_geometry")
+        if geom:
+            self.restoreGeometry(geom)
+        state = self.settings.value("window_state")
+        if state:
+            self.restoreState(state)
+
+        # ── Restore UI preferences ────────────────────────────────────────
+        saved_zoom = self.settings.value("prefs/zoom_level", 1.0, type=float)
+        self.zoom_level = saved_zoom
+        zoom_pct = f"{int(saved_zoom * 100)}%"
+        if zoom_pct in [self.zoom_combo.itemText(i)
+                        for i in range(self.zoom_combo.count())]:
+            self.zoom_combo.blockSignals(True)
+            self.zoom_combo.setCurrentText(zoom_pct)
+            self.zoom_combo.blockSignals(False)
+
+        if self.settings.value("prefs/view_mode", 0, type=int) == self.CONTINUOUS:
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(0, self.toggle_view_mode)
+
+        if self.settings.value("prefs/dark_mode", False, type=bool):
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(0, self.toggle_dark_mode)
+
+        saved_color = self.settings.value("prefs/markup_color", "#FFFF00", type=str)
+        self.markup_color = QColor(saved_color)
+        self.markup_color_button.setStyleSheet(
+            f"background:{saved_color};"
+            f"color:{'white' if self.markup_color.lightness() < 128 else 'black'};"
+        )
 
         # ── Thumbnail drag reorder ────────────────────────────────────────
         # Annotations panel signals
@@ -119,6 +166,9 @@ class PDFReader(PDFReaderUI):
 
         self.thumbnail_list.model().rowsMoved.connect(
             lambda p, s, e, d, r: handle_thumbnail_reorder(self, p, s, e, d, r))
+
+        # ── Thumbnail double-click ────────────────────────────────────────
+        self.thumbnail_list.itemDoubleClicked.connect(self._thumbnail_double_clicked)
 
         self.update_status_bar()
 
@@ -178,8 +228,37 @@ class PDFReader(PDFReaderUI):
             self.status_bar.showMessage(f"File not found: {file_name}")
             return
         try:
-            doc = fitz.open(file_name)
-            # Handle password-protected PDFs
+            # ── File size warning for very large documents ────────────────
+            try:
+                file_size_mb = os.path.getsize(file_name) / (1024 * 1024)
+                if file_size_mb > 150:
+                    reply = QMessageBox.question(
+                        self, "Large File",
+                        f"This file is {file_size_mb:.0f} MB. Opening very large PDFs "                        f"may be slow.\n\nContinue?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                        QMessageBox.StandardButton.Yes)
+                    if reply != QMessageBox.StandardButton.Yes:
+                        return
+            except OSError:
+                # Can't stat the file — proceed with open attempt anyway
+                pass
+
+            # ── Open & repair ─────────────────────────────────────────────
+            try:
+                doc = fitz.open(file_name)
+            except fitz.FileDataError as fde:
+                QMessageBox.critical(
+                    self, "Corrupted PDF",
+                    f"The file appears to be corrupted and could not be opened.\n\n"
+                    f"Detail: {fde}")
+                self.status_bar.showMessage(f"Error: corrupted PDF – {file_name}")
+                return
+            except Exception as exc:
+                QMessageBox.critical(self, "Open Error", str(exc))
+                self.status_bar.showMessage(f"Error loading PDF: {exc}")
+                return
+
+            # ── Handle password-protected PDFs ────────────────────────────
             if doc.needs_pass:
                 dlg = PasswordPromptDialog(
                     filename=os.path.basename(file_name), parent=self)
@@ -204,6 +283,9 @@ class PDFReader(PDFReaderUI):
 
             self.annotations = load_annotations(self.pdf_document, file_name)
             self.markup_strokes = self._load_markup_strokes(file_name)
+            self._undo_stack.clear()
+            self._form_dirty = False
+            self._update_undo_redo_labels()
             self.bookmarks   = load_bookmarks(file_name)
 
             self.form_fields = {}
@@ -231,6 +313,8 @@ class PDFReader(PDFReaderUI):
             self.status_bar.showMessage(f"Opened: {file_name}")
             self._add_to_recent(file_name)
         except Exception as e:
+            QMessageBox.critical(self, "Unexpected Error",
+                f"An unexpected error occurred while opening the file:\n\n{e}")
             self.status_bar.showMessage(f"Error loading PDF: {e}")
 
     def _enable_all_controls(self):
@@ -258,6 +342,11 @@ class PDFReader(PDFReaderUI):
             self._act_move_up, self._act_move_down, self._act_bookmark,
             self._act_extract_pages, self._act_apply_redact,
             self._act_password,
+            self._act_ocr, self._act_export_docx, self._act_export_xlsx,
+            self._act_save_copy, self._act_reset_form,
+            self._act_undo, self._act_redo,
+            self._act_copy_text, self._act_select_all,
+            self._act_find, self._act_find_next, self._act_find_prev,
             # legacy compat
             self.save_as_button, self.properties_button,
             self.add_page_button, self.remove_page_button,
@@ -341,6 +430,18 @@ class PDFReader(PDFReaderUI):
         except Exception as e:
             self.status_bar.showMessage(f"Redaction error: {e}")
 
+    def _mark_modified(self):
+        """Put an asterisk in the title bar when there are unsaved changes."""
+        title = self.windowTitle()
+        if not title.startswith("*"):
+            self.setWindowTitle("*" + title)
+
+    def _clear_modified(self):
+        """Remove the asterisk after a successful save."""
+        title = self.windowTitle()
+        if title.startswith("*"):
+            self.setWindowTitle(title[1:])
+
     def save_pdf(self):
         """Incremental save back to the same file, or prompt if no path set."""
         if not self.pdf_document:
@@ -417,6 +518,7 @@ class PDFReader(PDFReaderUI):
             save_annotations(self)
             self._save_markup_strokes(path)
             save_bookmarks(self)
+            self._clear_modified()
             self.status_bar.showMessage(f"Saved: {path}")
         except Exception as e:
             self.status_bar.showMessage(f"Save error: {e}")
@@ -435,8 +537,9 @@ class PDFReader(PDFReaderUI):
                 with open(mp) as f:
                     raw = json.load(f)
                 return {int(k): v for k, v in raw.items()}
-            except Exception:
-                pass
+            except (OSError, ValueError, KeyError) as e:
+                import logging
+                logging.warning("_load_markup_strokes: could not read '%s': %s", mp, e)
         return {}
 
     def _save_markup_strokes(self, pdf_path):
@@ -444,8 +547,8 @@ class PDFReader(PDFReaderUI):
         try:
             with open(mp, "w") as f:
                 json.dump(self.markup_strokes, f)
-        except Exception:
-            pass
+        except OSError as e:
+            self.status_bar.showMessage(f"Warning: could not save markup strokes: {e}")
 
     # =========================================================================
     # Active tool management
@@ -515,6 +618,7 @@ class PDFReader(PDFReaderUI):
             self.markup_color_button.setStyleSheet(
                 f"background:{col.name()};"
                 f"color:{'white' if col.lightness() < 128 else 'black'};")
+            self.settings.setValue("prefs/markup_color", col.name())
 
     # =========================================================================
     # Signature
@@ -992,6 +1096,7 @@ class PDFReader(PDFReaderUI):
         try:
             field.field_value = value
             field.update()
+            self._form_dirty = True
         except Exception as e:
             self.status_bar.showMessage(f"Field update error: {e}")
 
@@ -1006,6 +1111,7 @@ class PDFReader(PDFReaderUI):
         try:
             fitz_widget.field_value = value
             fitz_widget.update()
+            self._form_dirty = True
         except Exception as e:
             self.status_bar.showMessage(f"Checkbox error: {e}")
 
@@ -1054,8 +1160,14 @@ class PDFReader(PDFReaderUI):
                 text, ok = QInputDialog.getText(
                     self, "Add Note", "Note text:")
                 if ok and text:
-                    self.annotations.setdefault(page_num, []).append(
-                        (pdf_pt.x, pdf_pt.y, text))
+                    item = (pdf_pt.x, pdf_pt.y, text)
+                    self.annotations.setdefault(page_num, []).append(item)
+                    self._undo_stack.push(Command(
+                        kind="annotation_add",
+                        redo_data={"page": page_num, "item": item},
+                        undo_data={"page": page_num, "item": item},
+                    ))
+                    self._update_undo_redo_labels()
                     save_annotations(self)
                     self.render_page_content(page_num, page_widget)
                     self.status_bar.showMessage("Sticky note added.")
@@ -1145,12 +1257,19 @@ class PDFReader(PDFReaderUI):
                 r, g, b = (self.markup_color.redF(),
                            self.markup_color.greenF(),
                            self.markup_color.blueF())
-                self.markup_strokes.setdefault(page_num, []).append({
+                stroke_fh = {
                     "type":   "freehand",
                     "points": pdf_pts,
                     "color":  [r, g, b],
                     "width":  3,
-                })
+                }
+                self.markup_strokes.setdefault(page_num, []).append(stroke_fh)
+                self._undo_stack.push(Command(
+                    kind="markup_add",
+                    redo_data={"page": page_num, "stroke": stroke_fh},
+                    undo_data={"page": page_num, "stroke": stroke_fh},
+                ))
+                self._update_undo_redo_labels()
             self._freehand_points = []
             self._freehand_page   = -1
             self.render_page_content(page_num, page_widget)
@@ -1235,11 +1354,18 @@ class PDFReader(PDFReaderUI):
         r, g, b = (self.markup_color.redF(),
                    self.markup_color.greenF(),
                    self.markup_color.blueF())
-        self.markup_strokes.setdefault(page_num, []).append({
+        stroke = {
             "type":  self.active_tool,
             "rects": rects,
             "color": [r, g, b],
-        })
+        }
+        self.markup_strokes.setdefault(page_num, []).append(stroke)
+        self._undo_stack.push(Command(
+            kind="markup_add",
+            redo_data={"page": page_num, "stroke": stroke},
+            undo_data={"page": page_num, "stroke": stroke},
+        ))
+        self._update_undo_redo_labels()
         self.render_page_content(page_num, page_widget)
         self.refresh_annotations_panel()
         self.status_bar.showMessage(
@@ -1264,7 +1390,13 @@ class PDFReader(PDFReaderUI):
                     if d < best_dist:
                         best_dist, best_idx = d, i
             if best_idx >= 0 and best_dist < 30:
-                strokes.pop(best_idx)
+                removed_stroke = strokes.pop(best_idx)
+                self._undo_stack.push(Command(
+                    kind="markup_remove",
+                    redo_data={"page": page_num, "stroke": removed_stroke},
+                    undo_data={"page": page_num, "stroke": removed_stroke},
+                ))
+                self._update_undo_redo_labels()
                 removed = True
         if not removed and page_num in self.annotations and self.annotations[page_num]:
             # Also allow erasing sticky notes
@@ -1276,7 +1408,13 @@ class PDFReader(PDFReaderUI):
                 if d < best_dist:
                     best_dist, best_idx = d, i
             if best_idx >= 0 and best_dist < 40:
-                self.annotations[page_num].pop(best_idx)
+                removed_note = self.annotations[page_num].pop(best_idx)
+                self._undo_stack.push(Command(
+                    kind="annotation_remove",
+                    redo_data={"page": page_num, "item": removed_note},
+                    undo_data={"page": page_num, "item": removed_note},
+                ))
+                self._update_undo_redo_labels()
                 if not self.annotations[page_num]:
                     del self.annotations[page_num]
                 removed = True
@@ -1404,6 +1542,7 @@ class PDFReader(PDFReaderUI):
         self.page_input.setText(str(self.current_page + 1))
 
     def update_ui_on_page_change(self):
+        self._autosave_form_data()
         self.active_tool     = TOOL_NONE
         self.annotation_mode = False
         self._clear_tool_buttons()
@@ -1472,7 +1611,7 @@ class PDFReader(PDFReaderUI):
             self.zoom_level = int(text.strip("%")) / 100.0
             self.update_view()
         except ValueError:
-            pass
+            self.status_bar.showMessage(f"Invalid zoom value: '{text}'")
 
     def set_zoom_fit_width(self):
         self.set_zoom_fit("width")
@@ -1527,6 +1666,7 @@ class PDFReader(PDFReaderUI):
             self.view_mode_button.setText("Continuous")
             self.prev_button.setEnabled(self.current_page > 0)
             self.next_button.setEnabled(self.current_page < self.total_pages - 1)
+        self.settings.setValue("prefs/view_mode", self.view_mode)
         self.update_view()
 
     def toggle_dark_mode(self):
@@ -1537,6 +1677,7 @@ class PDFReader(PDFReaderUI):
         else:
             self.scroll_area.setStyleSheet("background-color: #f0f0f0;")
             self.dark_mode_button.setText("Dark Mode")
+        self.settings.setValue("prefs/dark_mode", self.dark_mode)
 
     # =========================================================================
     # Annotation mode (back-compat shim → routes to active_tool)
@@ -1760,6 +1901,304 @@ class PDFReader(PDFReaderUI):
         QMessageBox.information(self, "Document Properties", info)
 
     # =========================================================================
+    # Window geometry persistence
+    # =========================================================================
+
+    # =========================================================================
+    # OCR
+    # =========================================================================
+
+    def _show_ocr(self):
+        if not self.pdf_document:
+            return
+        from ocr_dialog import OCRDialog
+        dlg = OCRDialog(
+            pdf_path=self.pdf_file_path,
+            total_pages=self.total_pages,
+            current_page=self.current_page,
+            parent=self)
+        if dlg.exec() and dlg.output_path:
+            # Reload the OCR'd document
+            reply = QMessageBox.question(
+                self, "OCR Complete",
+                f"OCR finished.\n\nOutput saved to:\n{dlg.output_path}"
+                "\n\nOpen the OCR'd document now?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.Yes)
+            if reply == QMessageBox.StandardButton.Yes:
+                self._open_pdf_path(dlg.output_path)
+
+    # =========================================================================
+    # Export
+    # =========================================================================
+
+    def _show_export(self, fmt: str = "docx"):
+        if not self.pdf_document:
+            return
+        from export_dialog import ExportDialog
+        dlg = ExportDialog(
+            pdf_path=self.pdf_file_path,
+            total_pages=self.total_pages,
+            current_page=self.current_page,
+            parent=self)
+        # Pre-select format
+        if fmt == "xlsx":
+            dlg._rb_xlsx.setChecked(True)
+        dlg.exec()
+
+    def closeEvent(self, event):
+        """Auto-save form data and persist window geometry on close."""
+        self._autosave_form_data()
+        self.settings.setValue("window_geometry", self.saveGeometry())
+        self.settings.setValue("window_state", self.saveState())
+        self._save_sidebar_state()
+        self.settings.setValue("prefs/zoom_level",   self.zoom_level)
+        self.settings.setValue("prefs/view_mode",    self.view_mode)
+        self.settings.setValue("prefs/dark_mode",    self.dark_mode)
+        self.settings.setValue("prefs/markup_color", self.markup_color.name())
+        super().closeEvent(event)
+
+    # =========================================================================
+    # Save a Copy  (Phase 0 – new safe save option)
+    # =========================================================================
+
+    def save_a_copy(self):
+        """Save a copy of the current document to a new path without changing
+        the working path (safe alternative to Save As)."""
+        if not self.pdf_document:
+            return
+        default = self.pdf_file_path or "copy.pdf"
+        if default:
+            import os as _os
+            base, ext = _os.path.splitext(default)
+            default = base + "_copy" + ext
+        file_name, _ = QFileDialog.getSaveFileName(
+            self, "Save a Copy", default, "PDF Files (*.pdf)")
+        if file_name:
+            try:
+                self.pdf_document.save(file_name, garbage=3, deflate=True)
+                self.status_bar.showMessage(f"Copy saved: {file_name}")
+            except Exception as e:
+                QMessageBox.critical(self, "Save Error", str(e))
+
+    # =========================================================================
+    # Undo / Redo  (Phase 0 – annotation & markup; Phase 2 – page ops)
+    # =========================================================================
+
+    def undo(self):
+        cmd = self._undo_stack.pop_undo()
+        if cmd is None:
+            self.status_bar.showMessage("Nothing to undo.")
+            return
+        self._apply_command(cmd, direction="undo")
+        self._update_undo_redo_labels()
+
+    def redo(self):
+        cmd = self._undo_stack.pop_redo()
+        if cmd is None:
+            self.status_bar.showMessage("Nothing to redo.")
+            return
+        self._apply_command(cmd, direction="redo")
+        self._update_undo_redo_labels()
+
+    def _apply_command(self, cmd, direction):
+        """Apply undo or redo payload for the given command."""
+        data = cmd.undo_data if direction == "undo" else cmd.redo_data
+        kind = cmd.kind
+
+        if kind == "annotation_add":
+            page_num, item = data["page"], data["item"]
+            if direction == "undo":
+                self.annotations.get(page_num, [])
+                lst = self.annotations.setdefault(page_num, [])
+                if item in lst:
+                    lst.remove(item)
+            else:
+                self.annotations.setdefault(page_num, []).append(item)
+            self._finish_markup_undo(page_num, "Sticky note undone." if direction == "undo" else "Sticky note redone.")
+
+        elif kind == "annotation_remove":
+            page_num, item = data["page"], data["item"]
+            if direction == "undo":
+                self.annotations.setdefault(page_num, []).append(item)
+            else:
+                lst = self.annotations.get(page_num, [])
+                if item in lst:
+                    lst.remove(item)
+            self._finish_markup_undo(page_num, "Annotation undone." if direction == "undo" else "Annotation redone.")
+
+        elif kind in ("markup_add", "markup_remove"):
+            page_num = data["page"]
+            stroke   = data["stroke"]
+            strokes  = self.markup_strokes.setdefault(page_num, [])
+            if (kind == "markup_add" and direction == "undo") or                (kind == "markup_remove" and direction == "redo"):
+                # Remove it
+                if stroke in strokes:
+                    strokes.remove(stroke)
+            else:
+                # Add it back
+                strokes.append(stroke)
+            msg = "Annotation undone." if direction == "undo" else "Annotation redone."
+            self._finish_markup_undo(page_num, msg)
+
+        elif kind == "page_add":
+            page_num = data["page"]
+            if direction == "undo":
+                # Remove the added page
+                if self.pdf_document and self.pdf_document.page_count > 1:
+                    self.pdf_document.delete_page(page_num)
+                    self.total_pages -= 1
+                    if self.current_page >= self.total_pages:
+                        self.current_page = self.total_pages - 1
+            else:
+                # Re-add it
+                if self.pdf_document:
+                    self.pdf_document.insert_page(page_num)
+                    self.total_pages += 1
+            self._finish_page_op("Page insert undone." if direction == "undo" else "Page insert redone.")
+
+        elif kind == "page_remove":
+            page_num  = data["page"]
+            page_bytes = data.get("page_bytes")
+            if direction == "undo" and page_bytes and self.pdf_document:
+                # Re-insert from saved bytes
+                tmp = fitz.open(stream=page_bytes, filetype="pdf")
+                self.pdf_document.insert_pdf(tmp, from_page=0, to_page=0,
+                                              start_at=page_num)
+                self.total_pages += 1
+                self.current_page = page_num
+                self._finish_page_op("Page deletion undone.")
+            elif direction == "redo" and self.pdf_document:
+                self.pdf_document.delete_page(page_num)
+                self.total_pages -= 1
+                if self.current_page >= self.total_pages:
+                    self.current_page = self.total_pages - 1
+                self._finish_page_op("Page deletion redone.")
+
+        elif kind == "page_move":
+            frm = data["from"]
+            to  = data["to"]
+            if self.pdf_document:
+                self.pdf_document.move_page(frm, to)
+                self.current_page = to
+            self._finish_page_op("Page move undone." if direction == "undo" else "Page move redone.")
+
+    def _finish_markup_undo(self, page_num, msg):
+        if 0 <= page_num < len(self.page_widgets):
+            self.render_page_content(page_num, self.page_widgets[page_num])
+        self.refresh_annotations_panel()
+        self.status_bar.showMessage(msg)
+        self._update_undo_redo_labels()
+
+    def _finish_page_op(self, msg):
+        from pdf_utils import _rebuild_after_page_op
+        _rebuild_after_page_op(self, msg)
+        self._update_undo_redo_labels()
+
+    def _update_undo_redo_labels(self):
+        """Keep Edit > Undo and Edit > Redo labels and enabled state in sync."""
+        can_undo = self._undo_stack.can_undo()
+        can_redo = self._undo_stack.can_redo()
+        cmd_u = self._undo_stack.peek_undo()
+        cmd_r = self._undo_stack.peek_redo()
+        kind_map = {
+            "annotation_add":    "Note",
+            "annotation_remove": "Note Erase",
+            "markup_add":        "Markup",
+            "markup_remove":     "Markup Erase",
+            "page_add":          "Insert Page",
+            "page_remove":       "Delete Page",
+            "page_move":         "Move Page",
+        }
+        u_label = f"Undo {kind_map.get(cmd_u.kind, '')}".strip() if cmd_u else "Undo"
+        r_label = f"Redo {kind_map.get(cmd_r.kind, '')}".strip() if cmd_r else "Redo"
+        self._act_undo.setText(f"&{u_label}\tCtrl+Z")
+        self._act_redo.setText(f"&{r_label}\tCtrl+Y")
+        self._act_undo.setEnabled(can_undo)
+        self._act_redo.setEnabled(can_redo)
+
+    def _select_all_text_on_page(self):
+        """Select all text on the current page and copy it to the clipboard."""
+        if not self.pdf_document:
+            return
+        try:
+            page = self.pdf_document.load_page(self.current_page)
+            text = page.get_text("text").strip()
+            if text:
+                QApplication.clipboard().setText(text)
+                self.status_bar.showMessage(
+                    f"Page {self.current_page + 1}: all text copied to clipboard "
+                    f"({len(text)} chars).")
+            else:
+                self.status_bar.showMessage(
+                    "No selectable text on this page (may be a scanned image).")
+        except Exception as e:
+            self.status_bar.showMessage(f"Select all error: {e}")
+
+    # =========================================================================
+    # Form: auto-save & reset  (Phase 2)
+    # =========================================================================
+
+    def _autosave_form_data(self):
+        """Persist in-memory form field values back into the fitz document."""
+        if not self.pdf_document or not self._form_dirty:
+            return
+        import logging
+        for page_num, fields in self.form_fields.items():
+            for field in fields:
+                try:
+                    field.update()
+                except Exception as e:
+                    logging.warning(
+                        "_autosave_form_data: failed updating field on page %d: %s",
+                        page_num, e)
+        self._form_dirty = False
+
+    def reset_form(self):
+        """Reset all form fields on the current page to their default values."""
+        if not self.pdf_document:
+            return
+        pn = self.current_page
+        if pn not in self.form_fields:
+            self.status_bar.showMessage("No form fields on this page.")
+            return
+        reply = QMessageBox.question(
+            self, "Reset Form",
+            f"Reset all form fields on page {pn + 1} to their defaults?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No)
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            page = self.pdf_document.load_page(pn)
+            for widget in page.widgets():
+                widget.field_value = widget.field_value_default or ""
+                widget.update()
+            self.form_fields[pn] = list(page.widgets())
+            self.render_page_content(pn, self.page_widgets[pn])
+            self.status_bar.showMessage(f"Form fields on page {pn + 1} reset.")
+        except Exception as e:
+            self.status_bar.showMessage(f"Reset error: {e}")
+
+    # =========================================================================
+    # Thumbnail double-click  (Phase 2)
+    # =========================================================================
+
+    def _thumbnail_double_clicked(self, item):
+        """Jump to page and center it in the viewport."""
+        row = self.thumbnail_list.row(item)
+        if not (0 <= row < self.total_pages):
+            return
+        self.current_page = row
+        self.update_ui_on_page_change()
+        if self.view_mode == self.CONTINUOUS:
+            self.scroll_to_page(self.current_page)
+        else:
+            # In single-page mode just ensure scroll is reset to top
+            self.scroll_area.verticalScrollBar().setValue(0)
+        self.status_bar.showMessage(f"Jumped to page {self.current_page + 1}.")
+
+        # =========================================================================
     # Utility hooks (called by UI signals or shortcuts)
     # =========================================================================
 
@@ -1778,12 +2217,16 @@ class PDFReader(PDFReaderUI):
 
     def add_page_action(self):
         add_page(self)
+        self._update_undo_redo_labels()
 
     def remove_page_action(self):
         remove_page(self)
+        self._update_undo_redo_labels()
 
     def move_page_up_action(self):
         move_page_up(self)
+        self._update_undo_redo_labels()
 
     def move_page_down_action(self):
         move_page_down(self)
+        self._update_undo_redo_labels()

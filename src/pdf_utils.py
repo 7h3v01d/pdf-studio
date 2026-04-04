@@ -27,8 +27,9 @@ def load_annotations(pdf_document, pdf_file_path):
                         text = annot.info["content"]
                         annotations.setdefault(page_num, []).append(
                             (pos.x, pos.y, text))
-        except Exception:
-            pass
+        except Exception as e:
+            import logging
+            logging.warning("load_annotations: failed reading embedded annotations: %s", e)
 
     annotation_file = pdf_file_path + ".annotations.json"
     if os.path.exists(annotation_file):
@@ -42,8 +43,9 @@ def load_annotations(pdf_document, pdf_file_path):
                                 for ex, ey, et in existing):
                         existing.append((x, y, text))
                 annotations[page_num] = existing
-        except Exception:
-            pass
+        except (OSError, ValueError, KeyError) as e:
+            import logging
+            logging.warning("load_annotations: could not read '%s': %s", annotation_file, e)
     return annotations
 
 
@@ -68,8 +70,9 @@ def load_bookmarks(pdf_file_path):
         try:
             with open(bm_file) as f:
                 return json.load(f)      # list of {page, label}
-        except Exception:
-            pass
+        except (OSError, ValueError) as e:
+            import logging
+            logging.warning("load_bookmarks: could not read '%s': %s", bm_file, e)
     return []
 
 
@@ -79,8 +82,8 @@ def save_bookmarks(pdf_reader):
         try:
             with open(bm_file, "w") as f:
                 json.dump(pdf_reader.bookmarks, f)
-        except Exception:
-            pass
+        except OSError as e:
+            pdf_reader.status_bar.showMessage(f"Warning: could not save bookmarks: {e}")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -189,7 +192,8 @@ def add_page(pdf_reader):
         pdf_reader.status_bar.showMessage("No PDF loaded")
         return
     try:
-        pdf_reader.pdf_document.insert_page(pdf_reader.current_page + 1)
+        inserted_at = pdf_reader.current_page + 1
+        pdf_reader.pdf_document.insert_page(inserted_at)
         pdf_reader.total_pages += 1
         new_ann = {}
         for pn, v in pdf_reader.annotations.items():
@@ -205,6 +209,12 @@ def add_page(pdf_reader):
             else:
                 new_sr.append({"page": r["page"] + 1, "rects": r["rects"]})
         pdf_reader.search_results = new_sr
+        from undo_stack import Command
+        pdf_reader._undo_stack.push(Command(
+            kind="page_add",
+            undo_data={"page": inserted_at},
+            redo_data={"page": inserted_at},
+        ))
         _rebuild_after_page_op(pdf_reader, "Blank page added")
     except Exception as e:
         pdf_reader.status_bar.showMessage(f"Error adding page: {e}")
@@ -215,7 +225,15 @@ def remove_page(pdf_reader):
         pdf_reader.status_bar.showMessage("Cannot remove: one page minimum")
         return
     try:
+        import fitz as _fitz
         cp = pdf_reader.current_page
+
+        # Snapshot the page as a single-page PDF bytes so undo can restore it
+        tmp = _fitz.open()
+        tmp.insert_pdf(pdf_reader.pdf_document, from_page=cp, to_page=cp)
+        page_bytes = tmp.tobytes()
+        tmp.close()
+
         pdf_reader.pdf_document.delete_page(cp)
         pdf_reader.total_pages -= 1
         if pdf_reader.current_page >= pdf_reader.total_pages:
@@ -230,6 +248,12 @@ def remove_page(pdf_reader):
             for r in pdf_reader.search_results
             if r["page"] != cp]
         pdf_reader.search_results = new_sr
+        from undo_stack import Command
+        pdf_reader._undo_stack.push(Command(
+            kind="page_remove",
+            undo_data={"page": cp, "page_bytes": page_bytes},
+            redo_data={"page": cp},
+        ))
         _rebuild_after_page_op(pdf_reader, "Page removed")
     except Exception as e:
         pdf_reader.status_bar.showMessage(f"Error removing page: {e}")
@@ -240,9 +264,16 @@ def move_page_up(pdf_reader):
         pdf_reader.status_bar.showMessage("Cannot move page up")
         return
     try:
-        pdf_reader.pdf_document.move_page(pdf_reader.current_page,
-                                          pdf_reader.current_page - 1)
-        pdf_reader.current_page -= 1
+        frm = pdf_reader.current_page
+        to  = frm - 1
+        pdf_reader.pdf_document.move_page(frm, to)
+        pdf_reader.current_page = to
+        from undo_stack import Command
+        pdf_reader._undo_stack.push(Command(
+            kind="page_move",
+            undo_data={"from": to, "to": frm},
+            redo_data={"from": frm, "to": to},
+        ))
         _rebuild_after_page_op(pdf_reader, "Page moved up")
     except Exception as e:
         pdf_reader.status_bar.showMessage(f"Error moving page: {e}")
@@ -254,9 +285,16 @@ def move_page_down(pdf_reader):
         pdf_reader.status_bar.showMessage("Cannot move page down")
         return
     try:
-        pdf_reader.pdf_document.move_page(pdf_reader.current_page,
-                                          pdf_reader.current_page + 1)
-        pdf_reader.current_page += 1
+        frm = pdf_reader.current_page
+        to  = frm + 1
+        pdf_reader.pdf_document.move_page(frm, to)
+        pdf_reader.current_page = to
+        from undo_stack import Command
+        pdf_reader._undo_stack.push(Command(
+            kind="page_move",
+            undo_data={"from": to, "to": frm},
+            redo_data={"from": frm, "to": to},
+        ))
         _rebuild_after_page_op(pdf_reader,
                                f"Page moved to position {pdf_reader.current_page + 1}")
     except Exception as e:
@@ -297,6 +335,12 @@ def handle_thumbnail_reorder(pdf_reader, parent, start, end, destination, row):
             else:
                 new_sr.append(r)
         pdf_reader.search_results = new_sr
+        from undo_stack import Command
+        pdf_reader._undo_stack.push(Command(
+            kind="page_move",
+            undo_data={"from": row, "to": start},
+            redo_data={"from": start, "to": row},
+        ))
         _rebuild_after_page_op(pdf_reader,
                                f"Page moved from {start + 1} to {row + 1}")
     except Exception as e:

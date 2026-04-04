@@ -8,9 +8,9 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QPushButton, QLabel,
     QToolBar, QLineEdit, QStatusBar, QComboBox, QDockWidget,
     QListWidget, QMenu, QMenuBar, QSizePolicy, QToolButton, QHBoxLayout,
-    QFrame, QMessageBox)
+    QFrame, QMessageBox, QSplitter, QScrollArea)
 from PyQt6.QtGui import QIcon, QShortcut, QKeySequence, QAction, QFont
-from PyQt6.QtCore import Qt, QSize
+from PyQt6.QtCore import Qt, QSize, QSettings
 from pdf_scroll_area import PDFScrollArea
 
 from about_dialog import APP_NAME, AboutDialog
@@ -19,6 +19,200 @@ from annotations_panel import AnnotationsPanel
 
 SINGLE_PAGE = 0
 CONTINUOUS  = 1
+
+_NAV_SECTION_KEY = "nav_panel/sections"
+
+
+class _NavHeader(QWidget):
+    """Header bar that captures clicks anywhere across its full width,
+    including on child label widgets."""
+
+    def __init__(self, on_click, parent=None):
+        super().__init__(parent)
+        self._on_click = on_click
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFixedHeight(26)
+        self.setObjectName("NavSectionHeader")
+
+    def mousePressEvent(self, event):
+        self._on_click()
+        event.accept()
+
+
+class NavSection(QWidget):
+    """
+    A collapsible sidebar section with a clickable header and a body widget.
+
+    The header shows an expand/collapse arrow, an emoji icon, and a title.
+    Clicking anywhere on the header (including the labels) toggles collapse.
+    Collapsed state persists via QSettings.
+    """
+
+    HEADER_H     = 26   # fixed header height in pixels
+    EXPANDED_MIN = 80   # minimum height when open — prevents splitter trapping
+    EXPAND_SHARE = 150  # default pixels claimed when expanding
+
+    def __init__(self, icon: str, title: str, body: QWidget,
+                 settings_key: str, parent=None):
+        super().__init__(parent)
+        self._settings_key = settings_key
+        self._body = body
+        self._collapsed = False
+        # Remember the last expanded size so we can restore it on re-expand
+        self._last_expanded_size = self.EXPAND_SHARE
+
+        self.setObjectName("NavSection")
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        # ── Header (proper subclass so all child clicks bubble up) ────────
+        self._header = _NavHeader(self.toggle, self)
+
+        hl = QHBoxLayout(self._header)
+        hl.setContentsMargins(6, 0, 6, 0)
+        hl.setSpacing(5)
+
+        self._arrow = QLabel("▾")
+        self._arrow.setObjectName("NavArrow")
+        self._arrow.setFixedWidth(12)
+        self._arrow.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+        icon_lbl = QLabel(icon)
+        icon_lbl.setObjectName("NavIcon")
+        icon_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+        title_lbl = QLabel(title)
+        title_lbl.setObjectName("NavTitle")
+        title_lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+        hl.addWidget(self._arrow)
+        hl.addWidget(icon_lbl)
+        hl.addWidget(title_lbl)
+        hl.addStretch()
+
+        root.addWidget(self._header)
+        root.addWidget(self._body)
+
+        # Collapsed state is restored in _post_splitter_init() AFTER the
+        # widget is parented to the splitter, so _repack_splitter() works.
+
+    # ── Public ────────────────────────────────────────────────────────────
+
+    def post_splitter_init(self):
+        """Call once after all NavSections have been added to the splitter."""
+        settings = QSettings("KeystoneAI", "PDFReaderPro")
+        if settings.value(self._settings_key, False, type=bool):
+            self._apply_collapsed(True, save=False)
+
+    def toggle(self):
+        # Snapshot current size before collapsing so we can restore it
+        splitter = self.parent()
+        if isinstance(splitter, QSplitter):
+            idx = splitter.indexOf(self)
+            if idx >= 0:
+                sz = splitter.sizes()[idx]
+                if sz > self.HEADER_H:
+                    self._last_expanded_size = sz
+        self._apply_collapsed(not self._collapsed)
+
+    def is_collapsed(self) -> bool:
+        return self._collapsed
+
+    def body(self) -> QWidget:
+        return self._body
+
+    # ── Internal ──────────────────────────────────────────────────────────
+
+    def _apply_collapsed(self, collapsed: bool, save: bool = True):
+        self._collapsed = collapsed
+        self._body.setVisible(not collapsed)
+        self._arrow.setText("▸" if collapsed else "▾")
+
+        if save:
+            settings = QSettings("KeystoneAI", "PDFReaderPro")
+            settings.setValue(self._settings_key, collapsed)
+
+        self._repack_splitter()
+
+    def _repack_splitter(self):
+        """Redistribute splitter sizes cleanly after a collapse or expand."""
+        splitter = self.parent()
+        if not isinstance(splitter, QSplitter):
+            return
+        idx = splitter.indexOf(self)
+        if idx < 0:
+            return
+
+        n = splitter.count()
+        current = list(splitter.sizes())
+
+        # Total available height (sum of all sections = splitter content height)
+        total = sum(current)
+        if total <= 0:
+            return
+
+        def is_open(i):
+            w = splitter.widget(i)
+            return isinstance(w, NavSection) and not w.is_collapsed()
+
+        if self._collapsed:
+            # ── Collapsing ────────────────────────────────────────────────
+            # freed is always non-negative: clamp so we never donate negative px
+            freed = max(0, current[idx] - self.HEADER_H)
+            current[idx] = self.HEADER_H
+
+            # Give freed space to the nearest open neighbour
+            # Prefer the one below, fall back to the one above
+            donated = False
+            for i in range(idx + 1, n):
+                if is_open(i):
+                    current[i] += freed
+                    donated = True
+                    break
+            if not donated:
+                for i in range(idx - 1, -1, -1):
+                    if is_open(i):
+                        current[i] += freed
+                        donated = True
+                        break
+            # If ALL others are also collapsed, the freed space just disappears
+            # (the splitter will have dead space at the bottom — acceptable).
+
+        else:
+            # ── Expanding ─────────────────────────────────────────────────
+            # How much space to claim: restore last known size, clamped to
+            # what's actually available from open neighbours.
+            open_others = [i for i in range(n) if i != idx and is_open(i)]
+
+            available_from_others = sum(current[i] for i in open_others)
+            # Never steal more than leaves each open neighbour with EXPANDED_MIN
+            max_steal = sum(
+                max(0, current[i] - self.EXPANDED_MIN) for i in open_others
+            )
+            want = max(self.EXPANDED_MIN,
+                       min(self._last_expanded_size, max_steal))
+
+            if want > 0 and open_others:
+                # Take proportionally from open neighbours
+                steal_total = sum(current[i] for i in open_others)
+                for i in open_others:
+                    share = current[i] / steal_total if steal_total else 0
+                    current[i] = max(self.EXPANDED_MIN,
+                                     current[i] - int(want * share))
+            current[idx] = want
+
+        splitter.setSizes(current)
+
+    def minimumSizeHint(self):
+        if self._collapsed:
+            return QSize(0, self.HEADER_H)
+        return QSize(0, self.HEADER_H + self.EXPANDED_MIN)
+
+    def sizeHint(self):
+        if self._collapsed:
+            return QSize(200, self.HEADER_H)
+        return QSize(200, self._last_expanded_size)
 
 
 class PDFReaderUI(QMainWindow):
@@ -117,9 +311,11 @@ class PDFReaderUI(QMainWindow):
         self._act_print   = QAction("&Print…",    self)
         self._act_props   = QAction("&Properties",self)
         self._act_quit    = QAction("&Quit",       self)
+        self._act_save_copy = QAction("Save a &Copy…", self)
         self._act_open.setIcon(QIcon.fromTheme("document-open"))
         self._act_save.setIcon(QIcon.fromTheme("document-save"))
         self._act_save_as.setIcon(QIcon.fromTheme("document-save-as"))
+        self._act_save_copy.setIcon(QIcon.fromTheme("document-save-as"))
         self._act_print.setIcon(QIcon.fromTheme("document-print"))
         self._act_props.setIcon(QIcon.fromTheme("document-properties"))
         self._act_quit.setShortcut("Ctrl+Q")
@@ -127,11 +323,44 @@ class PDFReaderUI(QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction(self._act_save)
         file_menu.addAction(self._act_save_as)
+        file_menu.addAction(self._act_save_copy)
+        file_menu.addSeparator()
+        # Export As submenu — actions defined after Tools menu below
+        self._export_menu = file_menu.addMenu("📤  Export &As")
         file_menu.addSeparator()
         file_menu.addAction(self._act_print)
         file_menu.addAction(self._act_props)
         file_menu.addSeparator()
         file_menu.addAction(self._act_quit)
+
+        # ── Edit ─────────────────────────────────────────────────────────
+        edit_menu = mb.addMenu("&Edit")
+        self._act_undo          = QAction("&Undo",              self)
+        self._act_redo          = QAction("&Redo",              self)
+        self._act_copy_text     = QAction("&Copy Selected Text", self)
+        self._act_select_all    = QAction("Select &All Text on Page", self)
+        self._act_find          = QAction("&Find…",             self)
+        self._act_find_next     = QAction("Find &Next",         self)
+        self._act_find_prev     = QAction("Find &Previous",     self)
+        self._act_undo.setShortcut("Ctrl+Z")
+        self._act_redo.setShortcut("Ctrl+Y")
+        self._act_copy_text.setShortcut("Ctrl+C")
+        self._act_find.setShortcut("Ctrl+F")
+        self._act_find_next.setShortcut("F3")
+        self._act_find_prev.setShortcut("Shift+F3")
+        self._act_undo.setIcon(QIcon.fromTheme("edit-undo"))
+        self._act_redo.setIcon(QIcon.fromTheme("edit-redo"))
+        self._act_copy_text.setIcon(QIcon.fromTheme("edit-copy"))
+        self._act_find.setIcon(QIcon.fromTheme("edit-find"))
+        edit_menu.addAction(self._act_undo)
+        edit_menu.addAction(self._act_redo)
+        edit_menu.addSeparator()
+        edit_menu.addAction(self._act_copy_text)
+        edit_menu.addAction(self._act_select_all)
+        edit_menu.addSeparator()
+        edit_menu.addAction(self._act_find)
+        edit_menu.addAction(self._act_find_next)
+        edit_menu.addAction(self._act_find_prev)
 
         # ── View ─────────────────────────────────────────────────────────
         view_menu = mb.addMenu("&View")
@@ -177,10 +406,12 @@ class PDFReaderUI(QMainWindow):
 
         # ── Tools ────────────────────────────────────────────────────────
         tools_menu = mb.addMenu("&Tools")
-        self._act_merge_split   = QAction("&Merge / Split PDFs…",  self)
-        self._act_password      = QAction("&Password Protect…",       self)
-        self._act_extract_pages = QAction("&Extract Pages…",          self)
-        self._act_apply_redact  = QAction("Apply &Redactions",          self)
+        self._act_merge_split   = QAction("&Merge / Split PDFs…",    self)
+        self._act_password      = QAction("&Password Protect…",      self)
+        self._act_extract_pages = QAction("&Extract Pages…",         self)
+        self._act_apply_redact  = QAction("Apply &Redactions",       self)
+        self._act_reset_form    = QAction("&Reset Form Fields",      self)
+        self._act_ocr           = QAction("🔍  Run &OCR…",           self)
         self._act_merge_split.setIcon(QIcon.fromTheme("document-new"))
         self._act_extract_pages.setIcon(QIcon.fromTheme("document-save"))
         self._act_apply_redact.setIcon(QIcon.fromTheme("edit-delete"))
@@ -189,6 +420,19 @@ class PDFReaderUI(QMainWindow):
         tools_menu.addAction(self._act_password)
         tools_menu.addSeparator()
         tools_menu.addAction(self._act_apply_redact)
+        tools_menu.addSeparator()
+        tools_menu.addAction(self._act_reset_form)
+        tools_menu.addSeparator()
+        tools_menu.addAction(self._act_ocr)
+
+        # ── File → Export As submenu ──────────────────────────────────────
+        # (inserted into File menu after it's built — we patch it below)
+        self._act_export_docx = QAction("Microsoft &Word (.docx)…",  self)
+        self._act_export_xlsx = QAction("Microsoft &Excel (.xlsx)…", self)
+
+        # Populate Export As submenu (actions declared above in Tools block)
+        self._export_menu.addAction(self._act_export_docx)
+        self._export_menu.addAction(self._act_export_xlsx)
 
         # ── Help ─────────────────────────────────────────────────────────
         help_menu = mb.addMenu("&Help")
@@ -330,17 +574,17 @@ class PDFReaderUI(QMainWindow):
     def _setup_sidebar(self):
         self.sidebar = QDockWidget("Navigation", self)
         self.sidebar.setObjectName("NavDock")
-        self.sidebar.setMinimumWidth(185)
-        sw = QWidget()
-        sl = QVBoxLayout(sw)
-        sl.setContentsMargins(4, 6, 4, 4)
-        sl.setSpacing(4)
+        self.sidebar.setMinimumWidth(200)
 
-        sl.addWidget(_section_label("📑 CONTENTS"))
-        self.toc_list.setMaximumHeight(160)
-        sl.addWidget(self.toc_list)
+        # ── Contents body ─────────────────────────────────────────────────
+        self.toc_list.setMinimumHeight(40)
 
-        sl.addWidget(_section_label("🔖 BOOKMARKS"))
+        # ── Bookmarks body ────────────────────────────────────────────────
+        bm_body = QWidget()
+        bm_body.setObjectName("NavSectionBody")
+        bm_vl = QVBoxLayout(bm_body)
+        bm_vl.setContentsMargins(4, 2, 4, 4)
+        bm_vl.setSpacing(3)
         bm_row = QHBoxLayout()
         bm_row.setSpacing(4)
         self.add_bookmark_button    = QPushButton("+ Add")
@@ -349,22 +593,57 @@ class PDFReaderUI(QMainWindow):
         self.remove_bookmark_button.setFixedHeight(24)
         bm_row.addWidget(self.add_bookmark_button)
         bm_row.addWidget(self.remove_bookmark_button)
-        sl.addLayout(bm_row)
-        self.bookmark_list.setMaximumHeight(120)
-        sl.addWidget(self.bookmark_list)
+        bm_vl.addLayout(bm_row)
+        self.bookmark_list.setMinimumHeight(40)
+        bm_vl.addWidget(self.bookmark_list)
 
-        sl.addWidget(_section_label("💬 ANNOTATIONS"))
-        sl.addWidget(self.annot_panel)
-
-        sl.addWidget(_section_label("🖼 THUMBNAILS"))
+        # ── Thumbnails body ───────────────────────────────────────────────
         self.thumbnail_list.setIconSize(QSize(90, 120))
         self.thumbnail_list.setDragDropMode(QListWidget.DragDropMode.InternalMove)
         self.thumbnail_list.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.thumbnail_list.setSelectionMode(QListWidget.SelectionMode.SingleSelection)
-        sl.addWidget(self.thumbnail_list, stretch=1)
+        self.thumbnail_list.setMinimumHeight(60)
 
-        self.sidebar.setWidget(sw)
+        # ── NavSection wrappers ───────────────────────────────────────────
+        self._nav_contents    = NavSection("📑", "CONTENTS",    self.toc_list,      "nav/contents")
+        self._nav_bookmarks   = NavSection("🔖", "BOOKMARKS",   bm_body,            "nav/bookmarks")
+        self._nav_annotations = NavSection("💬", "ANNOTATIONS", self.annot_panel,   "nav/annotations")
+        self._nav_thumbnails  = NavSection("🖼", "THUMBNAILS",  self.thumbnail_list, "nav/thumbnails")
+
+        # ── Splitter ──────────────────────────────────────────────────────
+        self._nav_splitter = QSplitter(Qt.Orientation.Vertical)
+        self._nav_splitter.setObjectName("NavSplitter")
+        self._nav_splitter.setChildrenCollapsible(True)   # we manage sizes ourselves
+        self._nav_splitter.addWidget(self._nav_contents)
+        self._nav_splitter.addWidget(self._nav_bookmarks)
+        self._nav_splitter.addWidget(self._nav_annotations)
+        self._nav_splitter.addWidget(self._nav_thumbnails)
+
+        # Default proportional sizes (pixels) — thumbnails gets the most space
+        self._nav_splitter.setSizes([140, 130, 130, 300])
+
+        # Now that all sections are parented to the splitter, restore collapsed
+        # state — this must happen AFTER addWidget() so parent() is valid.
+        for sec in (self._nav_contents, self._nav_bookmarks,
+                    self._nav_annotations, self._nav_thumbnails):
+            sec.post_splitter_init()
+
+        # Restore saved splitter sizes (applied after collapse state so the
+        # saved sizes correctly reflect collapsed=26 sections).
+        settings = QSettings("KeystoneAI", "PDFReaderPro")
+        splitter_state = settings.value("nav/splitter_state")
+        if splitter_state:
+            self._nav_splitter.restoreState(splitter_state)
+
+        # Splitter goes directly into the dock — no scroll wrapper,
+        # which would break self.parent() in NavSection._repack_splitter()
+        self.sidebar.setWidget(self._nav_splitter)
         self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.sidebar)
+
+    def _save_sidebar_state(self):
+        """Persist splitter sizes — call from closeEvent."""
+        settings = QSettings("KeystoneAI", "PDFReaderPro")
+        settings.setValue("nav/splitter_state", self._nav_splitter.saveState())
 
     # =========================================================================
     # PDF viewport
@@ -395,9 +674,19 @@ class PDFReaderUI(QMainWindow):
 
     def _wire_signals(self):
         # Menu actions
+        # Edit menu
+        self._act_undo.triggered.connect(self.undo)
+        self._act_redo.triggered.connect(self.redo)
+        self._act_copy_text.triggered.connect(self.copy_selected_text)
+        self._act_select_all.triggered.connect(self._select_all_text_on_page)
+        self._act_find.triggered.connect(self.focus_search)
+        self._act_find_next.triggered.connect(self.next_search_result)
+        self._act_find_prev.triggered.connect(self.prev_search_result)
+
         self._act_open.triggered.connect(self.open_pdf)
         self._act_save.triggered.connect(self.save_pdf)
         self._act_save_as.triggered.connect(self.save_pdf_as)
+        self._act_save_copy.triggered.connect(self.save_a_copy)
         self._act_print.triggered.connect(self.print_pdf)
         self._act_props.triggered.connect(self.show_metadata)
         self._act_quit.triggered.connect(self.close)
@@ -420,8 +709,14 @@ class PDFReaderUI(QMainWindow):
         self._act_password.triggered.connect(self.show_password_dialog)
         self._act_extract_pages.triggered.connect(self._show_extract_pages)
         self._act_apply_redact.triggered.connect(self.apply_redactions)
+        self._act_reset_form.triggered.connect(self.reset_form)
         self._act_about.triggered.connect(self._show_about)
         self._act_shortcuts.triggered.connect(self._show_shortcuts_help)
+        self._act_ocr.triggered.connect(self._show_ocr)
+        self._act_export_docx.triggered.connect(
+            lambda: self._show_export("docx"))
+        self._act_export_xlsx.triggered.connect(
+            lambda: self._show_export("xlsx"))
 
         # Main toolbar
         self.open_button.clicked.connect(self.open_pdf)
@@ -489,6 +784,11 @@ class PDFReaderUI(QMainWindow):
     # =========================================================================
 
     def _setup_shortcuts(self):
+        # Undo/Redo shortcuts live on the Edit menu actions (setShortcut)
+        # Additional aliases
+        QShortcut(QKeySequence("Ctrl+Shift+Z"), self, self.redo)
+        QShortcut(QKeySequence("F3"),           self, self.next_search_result)
+        QShortcut(QKeySequence("Shift+F3"),     self, self.prev_search_result)
         QShortcut(QKeySequence("Ctrl+O"),       self, self.open_pdf)
         QShortcut(QKeySequence("Ctrl+S"),       self, self.save_pdf)
         QShortcut(QKeySequence("Ctrl+P"),       self, self.print_pdf)
@@ -672,13 +972,58 @@ class PDFReaderUI(QMainWindow):
             QListWidget::item:selected { background: #3a7bd5; color: #fff; }
             QListWidget::item:hover:!selected { background: #eaf0fb; }
 
-            /* Sidebar section labels */
+            /* Sidebar section labels (legacy) */
             QLabel#SectionLabel {
                 color: #888;
                 font-size: 9px;
                 font-weight: bold;
                 letter-spacing: 0.8px;
                 padding: 4px 2px 2px 2px;
+            }
+
+            /* ── Collapsible nav sections ─────────────────────────── */
+            QWidget#NavSectionHeader {
+                background: #2c2c2c;
+                border-top: 1px solid #444;
+            }
+            QWidget#NavSectionHeader:hover {
+                background: #3a3a3a;
+            }
+            QLabel#NavArrow {
+                color: #aaa;
+                font-size: 10px;
+                font-weight: bold;
+            }
+            QLabel#NavIcon {
+                font-size: 12px;
+            }
+            QLabel#NavTitle {
+                color: #e0e0e0;
+                font-size: 10px;
+                font-weight: bold;
+                letter-spacing: 0.7px;
+            }
+            QWidget#NavSection {
+                background: #f8f8f8;
+                border-bottom: 1px solid #e0e0e0;
+            }
+            QWidget#NavSectionBody {
+                background: #fafafa;
+            }
+
+            /* Splitter handle — thin dark groove between sections */
+            QSplitter#NavSplitter::handle {
+                background: #d0d0d0;
+                height: 3px;
+            }
+            QSplitter#NavSplitter::handle:hover {
+                background: #3a7bd5;
+            }
+
+            /* Remove border from the nav scroll area */
+            QScrollArea#NavScrollArea {
+                background: transparent;
+                border: none;
             }
 
             /* Sidebar buttons */
@@ -730,7 +1075,12 @@ class PDFReaderUI(QMainWindow):
             self._act_move_up, self._act_move_down, self._act_bookmark,
             self._act_extract_pages, self._act_apply_redact,
             self._act_password,
+            self._act_ocr, self._act_export_docx, self._act_export_xlsx,
             # legacy compat
+            self._act_save_copy, self._act_reset_form,
+            self._act_undo, self._act_redo,
+            self._act_copy_text, self._act_select_all,
+            self._act_find, self._act_find_next, self._act_find_prev,
             self.save_as_button, self.properties_button,
             self.add_page_button, self.remove_page_button,
             self.move_up_button, self.move_down_button,
@@ -738,6 +1088,15 @@ class PDFReaderUI(QMainWindow):
         ]:
             w.setEnabled(False)
         self.status_bar.showMessage("Ready  –  open a PDF to begin")
+
+
+    # ── OCR / Export stubs (implemented in PDFReader) ───────────────────────
+
+    def _show_ocr(self):
+        pass   # overridden in pdf_reader_app.py
+
+    def _show_export(self, fmt: str):
+        pass   # overridden in pdf_reader_app.py
 
 
 # ── Module helpers ───────────────────────────────────────────────────────────
