@@ -1,4 +1,4 @@
-# PDF Reader Pro v1.1
+# Keystone PDF Studio Pro
 
 A professional PDF reader and editor built with Python and PyQt6.  
 Developed by **Leon** @ **KeystoneAI**.
