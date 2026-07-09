@@ -936,6 +936,29 @@ class PDFReaderUI(QMainWindow):
             for b in self.main_toolbar.findChildren(_QTB):
                 if b.text():
                     b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+        self._recolor_toolbar_icons()
+
+    def _recolor_toolbar_icons(self):
+        """Tint toolbar icons to the theme's text colour on dark themes so the
+        dark monochrome glyphs stay legible; restore originals on light themes."""
+        from PyQt6.QtWidgets import QToolButton
+        theme = themes.THEMES[self.ui_theme]
+        icon_px = themes.SIZE_SCALES[self.ui_size]["icon"]
+        for tb_name in ("main_toolbar", "markup_toolbar"):
+            tb = getattr(self, tb_name, None)
+            if tb is None:
+                continue
+            for b in tb.findChildren(QToolButton):
+                orig = getattr(b, "_orig_icon", None)
+                if orig is None:
+                    orig = b.icon()
+                    if orig.isNull():
+                        continue
+                    b._orig_icon = orig      # stash once, tint from original
+                if theme.get("is_dark"):
+                    b.setIcon(themes.tint_icon(orig, theme["text"], icon_px))
+                else:
+                    b.setIcon(orig)
 
     def set_theme(self, theme_key: str):
         self.ui_theme = themes.resolve_theme(theme_key)

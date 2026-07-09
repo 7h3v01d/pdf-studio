@@ -40,6 +40,9 @@ TOOL_ERASER        = "eraser"
 TOOL_SIGNATURE     = "signature"
 TOOL_REDACT        = "redact"
 
+# Default on-page signature width in PDF points (aspect ratio preserved).
+DEFAULT_SIG_WIDTH_PT = 200
+
 
 class PDFReader(PDFReaderUI):
     def __init__(self):
@@ -684,26 +687,43 @@ class PDFReader(PDFReaderUI):
             self._sync_tool_buttons()
 
     def _place_signature_at(self, page_num, page_widget, click_x, click_y):
-        """Stamp the pending signature pixmap onto the page at the click point."""
+        """Stamp the pending (drawn/imported) signature at the click point."""
         if not self._pending_signature:
             return
-        pix = self._pending_signature
+        self._stamp_signature_pixmap(
+            page_num, page_widget, click_x, click_y, self._pending_signature)
+        self._pending_signature = None
+        self.active_tool = TOOL_NONE
+        self._sync_tool_buttons()
+        self._update_cursor()
+
+    def _stamp_signature_pixmap(self, page_num, page_widget, click_x, click_y, pix):
+        """Place any QPixmap onto a page as a signature image.
+
+        Used by both click-to-place and drag-and-drop. The image is sized to a
+        sensible default width in PDF points (preserving aspect ratio) so a
+        large scan or a 500px drawing both land at a usable size.
+        """
+        if pix is None or pix.isNull():
+            return
         matrix = fitz.Matrix(self.zoom_level, self.zoom_level).prerotate(self.rotation)
         try:
             inv = matrix.invert()
         except ValueError:
             return
 
-        # Convert click to PDF coordinates
+        # Click/drop point → PDF coordinates
         pdf_pt = fitz.Point(click_x, click_y) * inv
-        sig_w = pix.width()  / self.zoom_level
-        sig_h = pix.height() / self.zoom_level
-        pdf_rect = fitz.Rect(pdf_pt.x, pdf_pt.y,
-                             pdf_pt.x + sig_w, pdf_pt.y + sig_h)
 
-        # Convert pixmap → bytes for fitz
-        ba = pix.toImage().bits().asstring(pix.width() * pix.height() * 4)
-        import io
+        # Size in PDF points, aspect-preserved, capped to half the page width
+        aspect = (pix.height() / pix.width()) if pix.width() else 0.3
+        page = self.pdf_document.load_page(page_num)
+        max_w = page.rect.width * 0.5
+        sig_w = min(DEFAULT_SIG_WIDTH_PT, max_w)
+        sig_h = sig_w * aspect
+        pdf_rect = fitz.Rect(pdf_pt.x, pdf_pt.y, pdf_pt.x + sig_w, pdf_pt.y + sig_h)
+
+        # Pixmap → PNG bytes
         from PyQt6.QtCore import QBuffer, QIODevice
         buf = QBuffer()
         buf.open(QIODevice.OpenModeFlag.WriteOnly)
@@ -714,19 +734,59 @@ class PDFReader(PDFReaderUI):
         self.markup_strokes.setdefault(page_num, []).append({
             "type":        "signature",
             "rect":        list(pdf_rect),
-            "image_bytes": list(img_bytes),  # store as list for JSON
+            "image_bytes": list(img_bytes),
         })
 
-        # Also render it immediately on the page
-        page = self.pdf_document.load_page(page_num)
         page.insert_image(pdf_rect, stream=img_bytes)
-
-        self._pending_signature = None
-        self.active_tool = TOOL_NONE
-        self._sync_tool_buttons()
-        self._update_cursor()
         self.render_page_content(page_num, page_widget)
         self.status_bar.showMessage("Signature placed. Save to embed permanently.")
+
+    @staticmethod
+    def _first_image_url(mime):
+        exts = (".png", ".jpg", ".jpeg", ".bmp", ".gif")
+        if not mime.hasUrls():
+            return None
+        for url in mime.urls():
+            p = url.toLocalFile()
+            if p and os.path.splitext(p)[1].lower() in exts:
+                return p
+        return None
+
+    def _page_drag_enter(self, event):
+        if self._first_image_url(event.mimeData()):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def _page_drop(self, event, page_widget):
+        path = self._first_image_url(event.mimeData())
+        if not path:
+            event.ignore()
+            return
+        page_num = page_widget.property("page_num")
+        px, py = self._pixel_coords(event, page_widget)
+        if px is None:
+            event.ignore()
+            return
+        self.place_dropped_image(page_num, page_widget, px, py, path)
+        event.acceptProposedAction()
+
+    def place_dropped_image(self, page_num, page_widget, x, y, path):
+        """Handle an image file dropped onto a page — place it as a signature.
+
+        If the image has no transparency (e.g. a scan on white paper), the
+        white background is removed automatically so only the ink shows.
+        """
+        if not self.pdf_document:
+            return
+        from signature_dialog import make_white_transparent
+        pix = QPixmap(path)
+        if pix.isNull():
+            self.status_bar.showMessage(f"Could not load image: {os.path.basename(path)}")
+            return
+        if not pix.hasAlphaChannel():
+            pix = make_white_transparent(pix)
+        self._stamp_signature_pixmap(page_num, page_widget, x, y, pix)
 
     # =========================================================================
     # Stamp
@@ -833,6 +893,11 @@ class PDFReader(PDFReaderUI):
             page_widget.mouseMoveEvent    = lambda e, w=page_widget: self._handle_page_mouse_move(e, w)
             page_widget.mouseReleaseEvent = lambda e, w=page_widget: self._handle_page_mouse_release(e, w)
             page_widget.setMouseTracking(True)
+            # Drag & drop a signature/stamp image straight onto the page
+            page_widget.setAcceptDrops(True)
+            page_widget.dragEnterEvent = lambda e: self._page_drag_enter(e)
+            page_widget.dragMoveEvent  = lambda e: self._page_drag_enter(e)
+            page_widget.dropEvent      = lambda e, w=page_widget: self._page_drop(e, w)
             self.pdf_layout.addWidget(page_widget)
             self.page_widgets.append(page_widget)
 
@@ -1042,6 +1107,11 @@ class PDFReader(PDFReaderUI):
         if page_num not in self.form_fields or not self.form_fields[page_num]:
             return
 
+        # Form-field text scales with the accessibility text-size setting,
+        # capped by the field's own height so it never overflows.
+        _base = {"medium": 13, "large": 16, "xlarge": 20}.get(
+            getattr(self, "ui_size", "medium"), 13)
+
         label_size  = widget.size()
         pixmap_size = widget.pixmap().size() if widget.pixmap() else QSize(0, 0)
         x_offset = (label_size.width()  - pixmap_size.width())  // 2
@@ -1067,9 +1137,10 @@ class PDFReader(PDFReaderUI):
                         lambda f=field, le=fw: self._update_pdf_field(f, le.text()))
                 fw.setGeometry(int(tr.x0 + x_offset), int(tr.y0 + y_offset),
                                int(tr.width), int(tr.height))
+                _fs = max(11, min(_base, int(tr.height * 0.6)))
                 fw.setStyleSheet(
                     "border: 1px solid #4a90d9; background: rgba(220,235,255,180);"
-                    "border-radius: 2px; font-size: 11px;")
+                    f"border-radius: 2px; font-size: {_fs}px;")
                 fw.setToolTip(field.field_name or "Text field")
                 self.field_widgets[page_num].append(fw)
                 fw.show()

@@ -85,6 +85,7 @@ DEFAULT_SIZE = "large"   # start large — this app's first user has low vision
 THEMES: dict[str, dict] = {
     "hc_light": {
         "label": "High-Contrast Light",
+        "is_dark": False,
         "radius": 6,
         "window": "#e9e9e9",
         "chrome": "#ffffff",
@@ -112,6 +113,7 @@ THEMES: dict[str, dict] = {
     },
     "dark_industrial": {
         "label": "Dark Industrial",
+        "is_dark": True,
         "radius": 0,
         "window": "#05080b",
         "chrome": "#0e141b",
@@ -354,6 +356,29 @@ def build_stylesheet(theme_key: str, size_key: str, font_family: str | None = No
             font-size: {s2}px;
         }}
     """
+
+
+def tint_icon(icon, color_hex: str, size: int = 24):
+    """Return a copy of *icon* recoloured to a solid *color_hex*.
+
+    Preserves the icon's shape (alpha) and replaces its colour — used to make
+    dark monochrome toolbar glyphs legible on dark themes. Returns the original
+    icon unchanged if it has no usable pixmap.
+    """
+    from PyQt6.QtGui import QIcon, QPixmap, QPainter, QColor
+    from PyQt6.QtCore import QSize, Qt
+
+    src = icon.pixmap(QSize(size, size))
+    if src.isNull():
+        return icon
+    tinted = QPixmap(src.size())
+    tinted.fill(Qt.GlobalColor.transparent)
+    p = QPainter(tinted)
+    p.drawPixmap(0, 0, src)
+    p.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+    p.fillRect(tinted.rect(), QColor(color_hex))
+    p.end()
+    return QIcon(tinted)
 
 
 def app_font(size_key: str, family: str | None = None) -> QFont:
