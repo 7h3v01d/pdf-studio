@@ -7,10 +7,6 @@ under the **Apache License 2.0** — free to use, modify, and share.
 
 ---
 
-<img width="1920" height="1080" alt="pdf_studio" src="https://github.com/user-attachments/assets/e244296a-55ea-474d-aba1-1b337b176f89" />
-
----
-
 ## Features
 
 ### Viewing & Navigation
@@ -22,7 +18,7 @@ under the **Apache License 2.0** — free to use, modify, and share.
 
 ### Annotations & Markup
 - **Annotations** — sticky notes, highlights, underlines, strikethrough, freehand drawing, eraser
-- **Signatures & Stamps** — draw and place a handwritten signature; insert text stamps
+- **Signatures & Stamps** — add a signature by **drawing** it or **importing a PNG/JPG image** (with automatic white-background removal for scans); **drag-and-drop** an image straight onto the page; insert text stamps. (Image stamp, not a cryptographic/digital signature.)
 - **Redactions** — mark and permanently apply redactions
 - **Annotations Panel** — sidebar listing all annotations with jump-to and delete actions
 
@@ -159,6 +155,39 @@ The executable appears in `src/dist/`.
 
 ---
 
+## Make PDF Studio open your PDFs (Windows)
+
+PDF Studio accepts a file path on launch, so once it's associated with `.pdf`,
+double-clicking a PDF opens it here.
+
+**Easiest — from inside the app:** `File -> Set as Default PDF App...`. This
+registers PDF Studio (per-user, no admin needed) and opens Windows' *Default
+apps* page. Set **PDF Studio** as the default for `.pdf` there.
+
+**Or, per file in Explorer:** right-click a PDF -> *Open with* -> *Choose
+another app* -> **PDF Studio** -> tick *Always use this app*.
+
+> Windows 10/11 deliberately won't let an app silently make itself the default
+> handler (anti-hijacking). So there's always a one-time confirmation — the app
+> can register itself as an option, but you pick it as the default once.
+
+**From source / the built .exe:**
+
+```bat
+register_pdf.bat            :: register .pdf + Word/Excel (per-user)
+unregister_pdf.bat          :: remove the associations
+```
+
+The built executable also supports the flags directly:
+
+```bat
+"PDF Studio.exe" --register              :: .pdf + Word/Excel
+"PDF Studio.exe" --register --pdf-only   :: .pdf only
+"PDF Studio.exe" --unregister
+```
+
+---
+
 ## Keyboard Shortcuts
 
 | Shortcut | Action | Shortcut | Action |
@@ -176,6 +205,20 @@ The executable appears in `src/dist/`.
 ---
 
 ## Changelog
+
+### v2.5 — Windows file association
+- Opening a file passed on the command line now works, so double-clicking an associated PDF opens it (previously launched to a blank window)
+- `File -> Set as Default PDF App...` registers PDF Studio for PDF/Word/Excel (per-user, no admin) and opens Windows Default apps to confirm
+- `register_pdf.bat` / `unregister_pdf.bat` helpers, and `--register` / `--unregister` command-line flags
+
+### v2.4 — Dark-mode icon fix
+- Toolbar icons are now tinted to the theme's text colour on dark themes, so the dark glyphs stay legible on the dark toolbar; light themes are unchanged
+
+### v2.3 — Signatures & form polish
+- Signatures can now be **imported from a PNG/JPG image**, not just drawn, with optional white-background removal for scanned/photographed signatures
+- **Drag-and-drop** an image file directly onto a page to place it as a signature
+- Signatures now place at a sensible default size (previously could land oversized)
+- Form-field text scales with the accessibility text-size setting
 
 ### v2.2 — Open Word & Excel
 - `File → Open` now opens `.docx .doc .rtf .odt .xlsx .xls .ods .csv`, converting to PDF for viewing and markup

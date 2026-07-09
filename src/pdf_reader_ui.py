@@ -4,6 +4,7 @@ pdf_reader_ui.py
 UI layout, menu bar, toolbars, sidebar, shortcuts, and styles.
 All logic is implemented in the derived PDFReader class (pdf_reader_app.py).
 """
+import sys
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QPushButton, QLabel,
     QToolBar, QLineEdit, QStatusBar, QComboBox, QDockWidget,
@@ -332,6 +333,11 @@ class PDFReaderUI(QMainWindow):
         file_menu.addAction(self._act_print)
         file_menu.addAction(self._act_props)
         file_menu.addSeparator()
+        if sys.platform == "win32":
+            self._act_setdefault = QAction("Set as Default PDF App…", self)
+            self._act_setdefault.triggered.connect(self._set_default_pdf_app)
+            file_menu.addAction(self._act_setdefault)
+            file_menu.addSeparator()
         file_menu.addAction(self._act_quit)
 
         # ── Edit ─────────────────────────────────────────────────────────
@@ -886,6 +892,35 @@ class PDFReaderUI(QMainWindow):
     def _show_about(self):
         dlg = AboutDialog(self)
         dlg.exec()
+
+    def _set_default_pdf_app(self):
+        """Register PDF Studio as a handler for PDF files, then open the
+        Windows Default apps page so the user can confirm the default."""
+        if sys.platform != "win32":
+            QMessageBox.information(
+                self, "Windows only",
+                "Setting the default app is only available on Windows.")
+            return
+        try:
+            import register_file_types as reg
+            reg.register(pdf_only=False)
+        except Exception as e:
+            QMessageBox.warning(
+                self, "Couldn't register",
+                f"PDF Studio could not register file types:\n\n{e}")
+            return
+        QMessageBox.information(
+            self, "Almost done",
+            "PDF Studio has been added as an option for PDF (and Word/Excel) "
+            "files.\n\n"
+            "Windows will now open its 'Default apps' page. Set \"PDF Studio\" "
+            "as the default for .pdf there — or right-click any PDF -> Open "
+            "with -> choose PDF Studio and tick \"Always\".")
+        try:
+            import register_file_types as reg
+            reg.open_default_apps_settings()
+        except Exception:
+            pass
 
     def _show_shortcuts_help(self):
         dlg = AboutDialog(self)
