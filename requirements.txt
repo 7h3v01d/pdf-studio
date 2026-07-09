@@ -1,2 +1,20 @@
+# Core (required)
 PyMuPDF>=1.23.0
 PyQt6>=6.5.0
+
+# Optional — OCR (Tools > Run OCR). Also needs system Tesseract + Poppler on PATH.
+# pytesseract
+# pdf2image
+# Pillow
+
+# Optional — Export to Word (File > Export As > Word)
+# pdf2docx
+
+# Optional — Export to Excel (File > Export As > Excel). Also needs Java installed.
+# tabula-py
+# openpyxl
+# pandas
+
+# Optional — Open Word/Excel with exact fidelity via Microsoft Office (Windows)
+# pywin32
+# (No pip dep needed for the LibreOffice fallback — just install LibreOffice.)

@@ -1,0 +1,25 @@
+PDF Studio
+Copyright 2025 Leon Priest (github.com/7h3v01d)
+
+This product is licensed under the Apache License, Version 2.0.
+A copy of the license is included in LICENSE.txt.
+
+This software bundles or depends on the following third-party components,
+each under its own license:
+
+  - PyMuPDF (fitz)  — AGPL-3.0 / commercial (Artifex)
+  - PyQt6           — GPL-3.0 / commercial (Riverbank)
+
+Optional runtime dependencies (only loaded if the matching feature is used):
+
+  - pytesseract, pdf2image, Pillow   (OCR)
+  - pdf2docx                         (Export to Word)
+  - tabula-py, openpyxl, pandas      (Export to Excel)
+  - Tesseract-OCR, Poppler, Java     (external system tools)
+
+Bundled font:
+
+  - Atkinson Hyperlegible  — Copyright 2020 Braille Institute of America, Inc.
+    Licensed under the SIL Open Font License, Version 1.1.
+    Full license: src/fonts/OFL.txt
+    Designed to improve legibility for readers with low vision.

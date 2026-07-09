@@ -1,7 +1,7 @@
 """
 export_dialog.py
 ----------------
-Export dialog for PDF Reader Pro.
+Export dialog.
 
 Supports:
   • Export → Microsoft Word (.docx)   via pdf2docx

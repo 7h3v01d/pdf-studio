@@ -19,6 +19,7 @@ from PyQt6.QtCore import Qt, QRectF, QPoint, QSize, QSettings
 from PyQt6.QtPrintSupport import QPrinter, QPrintDialog
 
 from pdf_reader_ui import PDFReaderUI
+from about_dialog import APP_NAME
 from password_dialog import PasswordPromptDialog, PasswordProtectDialog
 from undo_stack import UndoStack, Command
 from pdf_utils import (
@@ -122,7 +123,7 @@ class PDFReader(PDFReaderUI):
         self._form_dirty = False
 
         # ── Recent files ─────────────────────────────────────────────────
-        self.settings    = QSettings("PyCentricStudio", "PDFReaderPro")
+        self.settings    = QSettings("LeonPriest", "PDFStudio")
         self.recent_files = self._load_recent_files()
         self._build_recent_menu()
 
@@ -219,14 +220,55 @@ class PDFReader(PDFReaderUI):
 
     def open_pdf(self):
         file_name, _ = QFileDialog.getOpenFileName(
-            self, "Open PDF", "", "PDF Files (*.pdf)")
+            self, "Open Document", "",
+            "All supported (*.pdf *.docx *.doc *.rtf *.odt *.xlsx *.xls *.ods *.csv);;"
+            "PDF Files (*.pdf);;"
+            "Word Documents (*.docx *.doc *.rtf *.odt);;"
+            "Excel Spreadsheets (*.xlsx *.xls *.ods *.csv);;"
+            "All Files (*)")
         if file_name:
             self._open_pdf_path(file_name)
 
-    def _open_pdf_path(self, file_name):
+    def _open_office_document(self, src):
+        """Convert a Word/Excel document to PDF, then open it for viewing."""
+        import doc_import
+        from PyQt6.QtWidgets import QApplication
+        from PyQt6.QtCore import Qt
+
+        name = os.path.basename(src)
+        self.status_bar.showMessage(f"Converting {name} …  (this can take a few seconds)")
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        QApplication.processEvents()
+        try:
+            pdf_path = doc_import.convert_to_pdf(src)
+        except doc_import.ImportUnavailable as e:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.warning(self, "Can't open this document", str(e))
+            self.status_bar.showMessage("Open cancelled — no converter available")
+            return
+        except Exception as e:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.critical(
+                self, "Conversion failed",
+                f"“{name}” could not be converted:\n\n{e}")
+            self.status_bar.showMessage(f"Could not convert {name}")
+            return
+        QApplication.restoreOverrideCursor()
+
+        # Open the converted PDF, but present it under the original filename.
+        self._open_pdf_path(pdf_path, display_path=src)
+
+    def _open_pdf_path(self, file_name, display_path=None):
         if not os.path.exists(file_name):
             self.status_bar.showMessage(f"File not found: {file_name}")
             return
+
+        # Word / Excel documents: convert to PDF first, then open that.
+        import doc_import
+        if display_path is None and doc_import.is_importable(file_name):
+            self._open_office_document(file_name)
+            return
+
         try:
             # ── File size warning for very large documents ────────────────
             try:
@@ -309,9 +351,11 @@ class PDFReader(PDFReaderUI):
             self.refresh_annotations_panel()
             self.update_ui_on_page_change()
             self.page_label.setText(f" / {self.total_pages}")
-            self.setWindowTitle(f"PDF Reader Pro  –  {os.path.basename(file_name)}")
-            self.status_bar.showMessage(f"Opened: {file_name}")
-            self._add_to_recent(file_name)
+            shown = display_path or file_name
+            suffix = "  (imported)" if display_path else ""
+            self.setWindowTitle(f"{APP_NAME}  –  {os.path.basename(shown)}{suffix}")
+            self.status_bar.showMessage(f"Opened: {shown}")
+            self._add_to_recent(display_path or file_name)
         except Exception as e:
             QMessageBox.critical(self, "Unexpected Error",
                 f"An unexpected error occurred while opening the file:\n\n{e}")
@@ -459,7 +503,7 @@ class PDFReader(PDFReaderUI):
         if file_name:
             self._do_save(file_name)
             self.pdf_file_path = file_name
-            self.setWindowTitle(f"PDF Reader Pro  –  {os.path.basename(file_name)}")
+            self.setWindowTitle(f"{APP_NAME}  –  {os.path.basename(file_name)}")
 
     def _do_save(self, path):
         try:
@@ -2230,3 +2274,5 @@ class PDFReader(PDFReaderUI):
     def move_page_down_action(self):
         move_page_down(self)
         self._update_undo_redo_labels()
+
+

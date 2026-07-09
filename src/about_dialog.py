@@ -1,8 +1,7 @@
 """
 about_dialog.py
 ---------------
-Professional About / Help dialog for PDF Reader Pro.
-Company: KeystoneAI  |  Lead Developer: Leon
+About / Help dialog.
 """
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -11,21 +10,22 @@ from PyQt6.QtGui import QFont, QColor, QPainter, QLinearGradient, QPixmap, QPen
 from PyQt6.QtCore import Qt, QSize, QRect
 
 
-# ── App metadata (edit here for new releases) ────────────────────────────────
-APP_NAME      = "PDF Reader Pro"
-APP_VERSION   = "1.0.0"
-COMPANY_NAME  = "KeystoneAI"
-LEAD_DEV      = "Lead Developer: Leon"
-DESCRIPTION   = (
-    "A professional PDF reader and editor built with Python and PyQt6.\n"
-    "Open, annotate, fill forms, sign, and manage your PDF documents\n"
-    "with a clean, modern interface."
+# ── App metadata — SINGLE SOURCE OF TRUTH ────────────────────────────────────
+# Change APP_NAME here and the whole app (title bar, About box, menus) follows.
+APP_NAME      = "PDF Studio"
+APP_VERSION   = "2.0.0"
+COMPANY_NAME  = "Leon Priest"
+LEAD_DEV      = "Leon Priest · github.com/7h3v01d"
+DESCRIPTION = (
+    "A professional PDF reader and editor for modern document workflows.\n"
+    "Open, annotate, sign, redact, fill forms, and organize PDF files\n"
+    "within a clean, capable, and production-ready interface."
 )
-COPYRIGHT     = "© 2025 KeystoneAI. All rights reserved."
+COPYRIGHT     = "© 2025 Leon Priest — Apache License 2.0"
 BUILT_WITH    = "PyMuPDF (MuPDF)  ·  PyQt6  ·  Python 3"
 # ─────────────────────────────────────────────────────────────────────────────
 
-ACCENT   = "#2563EB"   # KeystoneAI blue
+ACCENT   = "#2563EB"   # accent
 ACCENT_L = "#EFF6FF"   # light tint
 DARK     = "#1e293b"
 MID      = "#64748b"
@@ -56,7 +56,7 @@ def _logo_pixmap(size: int = 64) -> QPixmap:
     p.setPen(Qt.PenStyle.NoPen)
     p.drawEllipse(2, 2, size - 4, size - 4)
 
-    # Keystone shape (simplified pentagon / arch)
+    # Logo mark (simplified pentagon / arch)
     p.setPen(QPen(QColor("white"), 2.5, Qt.PenStyle.SolidLine,
                   Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
     p.setBrush(Qt.BrushStyle.NoBrush)

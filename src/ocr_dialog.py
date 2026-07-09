@@ -1,7 +1,7 @@
 """
 ocr_dialog.py
 -------------
-OCR dialog for PDF Reader Pro.
+OCR dialog.
 
 Runs pytesseract + pdf2image on the open document in a background thread,
 bakes the resulting text layer back into the PDF via PyMuPDF, and re-opens
@@ -18,6 +18,7 @@ System:
 """
 from __future__ import annotations
 import os
+import fitz  # PyMuPDF  (https://pymupdf.readthedocs.io/)
 import tempfile
 
 from PyQt6.QtWidgets import (

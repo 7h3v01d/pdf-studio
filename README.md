@@ -1,23 +1,9 @@
-# Keystone PDF Studio Pro
+# PDF Studio
 
-A professional PDF reader and editor built with Python and PyQt6.  
-Developed by **Leon** @ **KeystoneAI**.
+A free, full-featured PDF reader and editor built with Python and PyQt6.
 
----
-
-⚠️ **LICENSE & USAGE NOTICE — READ FIRST**
-
-This repository is **source-available for private technical evaluation and testing only**.
-
-- ❌ No commercial use  
-- ❌ No production use  
-- ❌ No academic, institutional, or government use  
-- ❌ No research, benchmarking, or publication  
-- ❌ No redistribution, sublicensing, or derivative works  
-- ❌ No independent development based on this code  
-
-All rights remain exclusively with the author.  
-Use of this software constitutes acceptance of the terms defined in **LICENSE.txt**.
+Created by **Leon Priest** ([github.com/7h3v01d](https://github.com/7h3v01d)) and released
+under the **Apache License 2.0** — free to use, modify, and share.
 
 ---
 
@@ -25,7 +11,7 @@ Use of this software constitutes acceptance of the terms defined in **LICENSE.tx
 
 ### Viewing & Navigation
 - **Open & View** — single-page and continuous scroll view modes, fit-width/fit-page zoom, rotate, dark mode, full-screen
-- **Navigation Panel** — collapsible, resizable sidebar with four independent sections: Table of Contents, Bookmarks, Annotations, and Page Thumbnails
+- **Navigation Panel** — collapsible, resizable sidebar: Table of Contents, Bookmarks, Annotations, Page Thumbnails
 - **Search** — full-text search with next/previous result navigation
 - **Recent Files** — quick-open split-button for the last 10 opened files
 - **Metadata Viewer** — inspect document properties
@@ -34,29 +20,31 @@ Use of this software constitutes acceptance of the terms defined in **LICENSE.tx
 - **Annotations** — sticky notes, highlights, underlines, strikethrough, freehand drawing, eraser
 - **Signatures & Stamps** — draw and place a handwritten signature; insert text stamps
 - **Redactions** — mark and permanently apply redactions
-- **Annotations Panel** — sidebar listing all annotations across the document with jump-to and delete actions
+- **Annotations Panel** — sidebar listing all annotations with jump-to and delete actions
 
 ### Editing & Page Management
-- **Form Filling** — interact with PDF form fields (text, checkboxes, dropdowns) directly in the viewer
+- **Form Filling** — text fields, checkboxes, dropdowns directly in the viewer
 - **Page Management** — add blank pages, remove pages, reorder via drag-and-drop thumbnails or move up/down
-- **Full Undo/Redo** — complete history for annotations, markup, page insert, page delete, and page move (including drag-to-reorder)
-- **Merge & Split** — merge multiple PDFs or split a PDF into separate files
-- **Extract Pages** — extract a range or selection of pages to a new PDF
+- **Full Undo/Redo** — annotations, markup, page insert/delete/move (including drag-to-reorder)
+- **Merge & Split** — merge multiple PDFs or split one into separate files
+- **Extract Pages** — extract a range or selection to a new PDF
 - **Password Protection** — open password-protected PDFs; encrypt saved PDFs with AES-256, set open/permissions passwords and granular permission flags
 
-### OCR & Export *(v1.1)*
-- **OCR** — `Tools → Run OCR…` makes scanned pages fully searchable and copy-able by adding an invisible text layer via Tesseract. Supports: all pages / current page / custom range; language selection from all installed Tesseract languages; non-blocking background processing with live progress; save as new file or overwrite original
-- **Export to Word** — `File → Export As → Microsoft Word (.docx)` preserves layout, text, images and columns via `pdf2docx`. Supports page range selection
-- **Export to Excel** — `File → Export As → Microsoft Excel (.xlsx)` extracts tables into styled spreadsheet sheets with headers, alternating rows and frozen panes via `tabula-py`
+### OCR & Export
+- **OCR** — `Tools → Run OCR…` adds an invisible searchable text layer via Tesseract (all/current/custom range; language selection; background processing; save-new or overwrite)
+- **Export to Word** — `File → Export As → Word (.docx)` preserves layout/text/images/columns via `pdf2docx`
+- **Export to Excel** — `File → Export As → Excel (.xlsx)` extracts tables into styled sheets via `tabula-py`
+
+### Open Word & Excel
+- **Open Word/Excel documents** — `File → Open` now accepts `.docx .doc .rtf .odt` and `.xlsx .xls .ods .csv`. The document is converted to PDF and opened for viewing and markup.
+- **Fidelity:** for an exact copy, the app uses **Microsoft Word/Excel** via automation when they're installed (identical to their own "Save as PDF"). If Office isn't present it falls back to **LibreOffice** (free) — very faithful, though not guaranteed pixel-identical for complex layouts. If neither is installed, it explains what to install.
 
 ### Output & Printing
-- **Save / Save As / Save a Copy** — flexible save options; title bar shows `*` when there are unsaved changes
+- **Save / Save As / Save a Copy** — title bar shows `*` on unsaved changes
 - **Print** — send the current document to any system printer
 
 ### Preferences & Persistence
-- Zoom level, view mode (single/continuous), dark mode, and markup colour are remembered across sessions
-- Navigation panel section collapse state and splitter sizes are remembered across sessions
-- Window geometry and state are remembered across sessions
+- Zoom, view mode, dark mode, markup colour, panel state, and window geometry are remembered across sessions
 
 ---
 
@@ -65,86 +53,90 @@ Use of this software constitutes acceptance of the terms defined in **LICENSE.tx
 ```
 pdf_reader.py            # Entry point — launches the application
 pdf_reader_app.py        # Core application logic (PDFReader class)
-pdf_reader_ui.py         # All UI construction (menus, toolbars, panels, NavSection)
-pdf_utils.py             # Utility functions (search, page ops, annotation I/O, undo push)
+pdf_reader_ui.py         # UI construction (menus, toolbars, panels, NavSection)
+pdf_utils.py             # Utilities (search, page ops, annotation I/O, undo push)
 pdf_scroll_area.py       # Custom QScrollArea (wheel zoom + page-flip)
-pdf_page_widget.py       # Custom QLabel for page rendering with form-field support
+pdf_page_widget.py       # Custom QLabel page rendering with form-field support
 annotations_panel.py     # Sidebar panel listing all annotations
 password_dialog.py       # Password prompt and encryption settings dialogs
 signature_dialog.py      # Draw-your-own signature dialog
 merge_split_dialog.py    # Merge / split PDF dialog
 extract_pages_dialog.py  # Extract pages dialog
-ocr_dialog.py            # OCR settings, progress, and background worker
+ocr_dialog.py            # OCR settings, progress, background worker
 export_dialog.py         # Export to Word / Excel with progress
-about_dialog.py          # About / keyboard shortcuts dialog
-undo_stack.py            # Lightweight command stack (annotation, markup, page ops)
+about_dialog.py          # About dialog + app metadata (APP_NAME, APP_VERSION, COMPANY_NAME)
+undo_stack.py            # Lightweight command stack
 icon.ico                 # Application icon
 ```
+
+> **Renaming the app:** the product name, version, and author live in one place —
+> the constants at the top of `src/about_dialog.py` (`APP_NAME`, `APP_VERSION`,
+> `COMPANY_NAME`). Change `APP_NAME` and the whole app (title bar, About box,
+> menus) follows. The build output name is set in `src/PDF Studio.spec`.
 
 ---
 
 ## Requirements
 
 - Python 3.10+
-- See `requirements.txt` for core dependencies
-- See **Optional Dependencies** below for OCR and Export features
+- Core: `PyMuPDF`, `PyQt6` (see `requirements.txt`)
+- Optional deps for OCR/Export — see below
 
 ---
 
 ## Installation
 
 ```bash
-# 1. Clone or download the project
-git clone https://github.com/your-username/pdf-reader-pro.git
-cd pdf-reader-pro/src
+cd pdf-studio/src
 
-# 2. (Recommended) Create a virtual environment
 python -m venv venv
 source venv/bin/activate        # macOS / Linux
 venv\Scripts\activate           # Windows
 
-# 3. Install core dependencies
-pip install -r requirements.txt
+pip install -r ../requirements.txt
 ```
 
 ---
 
 ## Optional Dependencies
 
-These are only required if you use the OCR or Export features. The app runs fine without them — the menu items will show a friendly error if a dependency is missing when you try to use them.
+Only needed for OCR/Export. The app runs fine without them — the relevant menu
+item shows a friendly error if a dependency is missing.
 
 ### OCR  (`Tools → Run OCR…`)
-
 ```bash
 pip install pytesseract pdf2image Pillow
 ```
-
-**System requirements:**
-
 | Dependency | Purpose | Download |
 |---|---|---|
 | **Tesseract-OCR** | OCR engine | [Windows installer](https://github.com/UB-Mannheim/tesseract/wiki) — add to PATH |
-| **Poppler** | PDF → image rendering for pdf2image | [poppler-windows](https://github.com/oschwartz10612/poppler-windows) — add `bin/` to PATH |
+| **Poppler** | PDF → image for pdf2image | [poppler-windows](https://github.com/oschwartz10612/poppler-windows) — add `bin/` to PATH |
 
-Additional Tesseract language packs can be installed separately; the language dropdown auto-populates from whatever is installed.
-
-### Export to Word  (`File → Export As → Word`)
-
+### Export to Word
 ```bash
 pip install pdf2docx
 ```
 
-### Export to Excel  (`File → Export As → Excel`)
-
+### Export to Excel
 ```bash
 pip install tabula-py openpyxl pandas
 ```
-
-**System requirements:**
-
 | Dependency | Purpose | Download |
 |---|---|---|
 | **Java** | Required by tabula-py | [java.com](https://www.java.com/en/download/) |
+
+### Open Word / Excel documents
+
+Highest fidelity uses the Office apps themselves (recommended on Windows):
+
+```bash
+pip install pywin32          # enables the Microsoft Word/Excel conversion path
+```
+
+| Dependency | Purpose | Notes |
+|---|---|---|
+| **Microsoft Office** | Exact Word/Excel-rendered PDF | Best fidelity; used automatically if installed |
+| **LibreOffice** | Free fallback converter | [libreoffice.org](https://www.libreoffice.org/download) — very faithful, not guaranteed identical |
 
 ---
 
@@ -154,80 +146,60 @@ pip install tabula-py openpyxl pandas
 python pdf_reader.py
 ```
 
+## Building a Windows .exe
+
+```bash
+buildit.bat          # runs: pyinstaller "PDF Studio.spec"
+```
+The executable appears in `src/dist/`.
+
 ---
 
 ## Keyboard Shortcuts
 
-| Shortcut | Action |
-|---|---|
-| `Ctrl+O` | Open file |
-| `Ctrl+S` | Save |
-| `Ctrl+Shift+S` | Save As |
-| `Ctrl+P` | Print |
-| `Ctrl+Q` | Quit |
-| `Ctrl+Z` | Undo |
-| `Ctrl+Y` | Redo |
-| `← / →` | Previous / next page |
-| `Ctrl+Home` | First page |
-| `Ctrl+End` | Last page |
-| `Ctrl++ / Ctrl+-` | Zoom in / out |
-| `Ctrl+Wheel` | Zoom in / out |
-| `Ctrl+Shift+H` | Fit width |
-| `Ctrl+Shift+F` | Fit page |
-| `Ctrl+R` | Rotate 90° |
-| `F11` | Toggle full screen |
-| `F4` | Toggle navigation panel |
-| `Ctrl+F` | Focus search box |
-| `F3 / Shift+F3` | Next / previous search result |
-| `Ctrl+C` | Copy selected text |
-| `Ctrl+B` | Add bookmark |
-| `Escape` | Cancel active tool |
+| Shortcut | Action | Shortcut | Action |
+|---|---|---|---|
+| `Ctrl+O` | Open | `Ctrl+R` | Rotate 90° |
+| `Ctrl+S` | Save | `F11` | Full screen |
+| `Ctrl+Shift+S` | Save As | `F4` | Toggle nav panel |
+| `Ctrl+P` | Print | `Ctrl+F` | Focus search |
+| `Ctrl+Q` | Quit | `F3 / Shift+F3` | Next / prev result |
+| `Ctrl+Z / Ctrl+Y` | Undo / Redo | `Ctrl+C` | Copy text |
+| `← / →` | Prev / next page | `Ctrl+B` | Add bookmark |
+| `Ctrl+Home / End` | First / last page | `Escape` | Cancel active tool |
+| `Ctrl++ / Ctrl+-` | Zoom in / out | `Ctrl+Shift+H / F` | Fit width / page |
 
 ---
 
 ## Changelog
 
+### v2.2 — Open Word & Excel
+- `File → Open` now opens `.docx .doc .rtf .odt .xlsx .xls .ods .csv`, converting to PDF for viewing and markup
+- Uses Microsoft Word/Excel via automation when installed (exact copy); falls back to LibreOffice (free) otherwise
+- Clear guidance shown if no converter is available
+
+### v2.1 — Accessibility & themes
+- Two switchable app themes: High-Contrast Light and Dark Industrial (View → Appearance), remembered across launches
+- App-wide text size control (Medium / Large / Extra Large) for low-vision readability
+- All UI text set in Atkinson Hyperlegible (bundled, SIL OFL) — designed for low vision
+- Toolbar buttons now carry text labels (also fixes blank icon-only buttons on Windows, which has no icon theme)
+- Larger, scalable toolbar icons
+
+### v2.0 — Free release
+- Removed the licensing/trial system entirely — no trial, activation, or feature gating
+- Relicensed under the Apache License 2.0
+- Rebranded to **PDF Studio** by Leon Priest; name/version centralised in `about_dialog.py`
+- Unified all persisted settings under a single store
+
 ### v1.1 — OCR & Export
-- Added `Tools → Run OCR…` — makes scanned PDFs searchable via Tesseract
-- Added `File → Export As → Microsoft Word (.docx)`
-- Added `File → Export As → Microsoft Excel (.xlsx)`
-- Zoom level, view mode, dark mode, and markup colour now persist across sessions
-- Title bar shows `*` prefix when document has unsaved changes
-- Undo/Redo now fully covers page insert, delete, and move (including drag-to-reorder)
-- Edit menu Undo/Redo labels update dynamically (e.g. "Undo Insert Page")
+- `Run OCR`, `Export As → Word`, `Export As → Excel`; preference persistence; unsaved `*`; fuller Undo/Redo
 
-### v1.0 — Initial Release
-- Full viewer with single-page and continuous scroll modes
-- Annotations, markup, signatures, stamps, and redactions
-- Form field interaction
-- Page management, merge/split, extract pages
-- Password protection (AES-256)
-- Collapsible, resizable Navigation Panel (Contents / Bookmarks / Annotations / Thumbnails)
-- Full-text search, bookmarks, TOC, recent files
-
----
-
-## Contribution Policy
-
-Feedback, bug reports, and suggestions are welcome.
-
-You may submit:
-
-- Issues
-- Design feedback
-- Pull requests for review
-
-However:
-
-- Contributions do not grant any license or ownership rights
-- The author retains full discretion over acceptance and future use
-- Contributors receive no rights to reuse, redistribute, or derive from this code
+### v1.0 — Initial release
+- Full viewer, annotations/markup/signatures/stamps/redactions, forms, page management, merge/split, extract, AES-256 protection, nav panel, search, bookmarks, TOC, recent files
 
 ---
 
 ## License
 
-This project is not open-source.
-
-It is licensed under a private evaluation-only license.  
-See LICENSE.txt for full terms.
+Apache License 2.0 — see `LICENSE.txt` for the full text and `NOTICE` for
+third-party attributions.

@@ -8,12 +8,13 @@ from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QPushButton, QLabel,
     QToolBar, QLineEdit, QStatusBar, QComboBox, QDockWidget,
     QListWidget, QMenu, QMenuBar, QSizePolicy, QToolButton, QHBoxLayout,
-    QFrame, QMessageBox, QSplitter, QScrollArea)
-from PyQt6.QtGui import QIcon, QShortcut, QKeySequence, QAction, QFont
+    QFrame, QMessageBox, QSplitter, QScrollArea, QApplication)
+from PyQt6.QtGui import QIcon, QShortcut, QKeySequence, QAction, QActionGroup, QFont
 from PyQt6.QtCore import Qt, QSize, QSettings
 from pdf_scroll_area import PDFScrollArea
 
 from about_dialog import APP_NAME, AboutDialog
+import themes
 from merge_split_dialog import MergeSplitDialog
 from annotations_panel import AnnotationsPanel
 
@@ -101,7 +102,7 @@ class NavSection(QWidget):
 
     def post_splitter_init(self):
         """Call once after all NavSections have been added to the splitter."""
-        settings = QSettings("KeystoneAI", "PDFReaderPro")
+        settings = QSettings("LeonPriest", "PDFStudio")
         if settings.value(self._settings_key, False, type=bool):
             self._apply_collapsed(True, save=False)
 
@@ -130,7 +131,7 @@ class NavSection(QWidget):
         self._arrow.setText("▸" if collapsed else "▾")
 
         if save:
-            settings = QSettings("KeystoneAI", "PDFReaderPro")
+            settings = QSettings("LeonPriest", "PDFStudio")
             settings.setValue(self._settings_key, collapsed)
 
         self._repack_splitter()
@@ -221,7 +222,7 @@ class PDFReaderUI(QMainWindow):
 
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("PDF Reader Pro")
+        self.setWindowTitle(APP_NAME)
         self.setGeometry(100, 100, 1100, 740)
         self.setMinimumSize(800, 500)
 
@@ -385,6 +386,39 @@ class PDFReaderUI(QMainWindow):
         view_menu.addAction(self._act_zoom_out)
         view_menu.addAction(self._act_rotate)
 
+        # ── Appearance (themes + text size) ──────────────────────────────
+        view_menu.addSeparator()
+        if not hasattr(self, "ui_theme"):
+            self._load_appearance_prefs()
+        appearance = view_menu.addMenu("&Appearance")
+
+        theme_group = QActionGroup(self)
+        theme_group.setExclusive(True)
+        self._theme_actions = {}
+        for key in themes.theme_keys():
+            act = QAction(themes.THEMES[key]["label"], self, checkable=True)
+            act.setChecked(key == self.ui_theme)
+            act.triggered.connect(lambda _=False, k=key: self.set_theme(k))
+            theme_group.addAction(act)
+            appearance.addAction(act)
+            self._theme_actions[key] = act
+
+        appearance.addSeparator()
+        size_header = QAction("Text Size", self)
+        size_header.setEnabled(False)
+        appearance.addAction(size_header)
+
+        size_group = QActionGroup(self)
+        size_group.setExclusive(True)
+        self._size_actions = {}
+        for key in themes.size_keys():
+            act = QAction(themes.SIZE_SCALES[key]["label"], self, checkable=True)
+            act.setChecked(key == self.ui_size)
+            act.triggered.connect(lambda _=False, k=key: self.set_ui_size(k))
+            size_group.addAction(act)
+            appearance.addAction(act)
+            self._size_actions[key] = act
+
         # ── Pages ────────────────────────────────────────────────────────
         pages_menu = mb.addMenu("&Pages")
         self._act_add_page    = QAction("&Insert Blank Page", self)
@@ -452,6 +486,7 @@ class PDFReaderUI(QMainWindow):
         tb.setMovable(False)
         tb.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonIconOnly)
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, tb)
+        tb.setObjectName("MainToolBar")
         self.main_toolbar = tb
 
         # Open split-button
@@ -462,45 +497,47 @@ class PDFReaderUI(QMainWindow):
         self.open_button.setAutoRaise(True)
         tb.addWidget(self.open_button)
 
-        self._tb_btn(tb, self.save_button,  "document-save",  "Save  (Ctrl+S)")
-        self._tb_btn(tb, self.print_button, "document-print", "Print  (Ctrl+P)")
+        self._tb_btn(tb, self.save_button,  "document-save",  "Save  (Ctrl+S)",  "Save")
+        self._tb_btn(tb, self.print_button, "document-print", "Print  (Ctrl+P)", "Print")
 
         tb.addSeparator()
 
         # Navigation
-        self._tb_btn(tb, self.prev_button, "go-previous", "Previous Page  (←)")
+        self._tb_btn(tb, self.prev_button, "go-previous", "Previous Page  (←)", "Prev")
         self.page_input.setFixedWidth(46)
         self.page_input.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.page_input.setPlaceholderText("1")
         tb.addWidget(self.page_input)
         self.page_label.setContentsMargins(2, 0, 4, 0)
         tb.addWidget(self.page_label)
-        self._tb_btn(tb, self.next_button, "go-next", "Next Page  (→)")
+        self._tb_btn(tb, self.next_button, "go-next", "Next Page  (→)", "Next")
 
         tb.addSeparator()
 
         # Zoom
-        self._tb_btn(tb, self.zoom_out_button, "zoom-out", "Zoom Out  (Ctrl+-)")
+        self._tb_btn(tb, self.zoom_out_button, "zoom-out", "Zoom Out  (Ctrl+-)", "Zoom −")
         self.zoom_combo.addItems(["25%","50%","75%","100%","125%","150%","200%","300%","400%"])
         self.zoom_combo.setCurrentText("100%")
         self.zoom_combo.setFixedWidth(80)
         tb.addWidget(self.zoom_combo)
-        self._tb_btn(tb, self.zoom_in_button, "zoom-in", "Zoom In  (Ctrl++)")
+        self._tb_btn(tb, self.zoom_in_button, "zoom-in", "Zoom In  (Ctrl++)", "Zoom +")
 
-        self.zoom_fit_width_button.setText("⇔")
+        self.zoom_fit_width_button.setText("Fit W")
         self.zoom_fit_width_button.setToolTip("Fit Width  (Ctrl+Shift+H)")
+        self.zoom_fit_width_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
         self.zoom_fit_width_button.setAutoRaise(True)
         tb.addWidget(self.zoom_fit_width_button)
 
-        self.zoom_fit_page_button.setText("⛶")
+        self.zoom_fit_page_button.setText("Fit Pg")
         self.zoom_fit_page_button.setToolTip("Fit Page  (Ctrl+Shift+F)")
+        self.zoom_fit_page_button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
         self.zoom_fit_page_button.setAutoRaise(True)
         tb.addWidget(self.zoom_fit_page_button)
 
         tb.addSeparator()
 
-        self._tb_btn(tb, self.rotate_button,    "image-rotate",   "Rotate 90°  (Ctrl+R)")
-        self._tb_btn(tb, self.fullscreen_button, "view-fullscreen","Full Screen  (F11)")
+        self._tb_btn(tb, self.rotate_button,    "image-rotate",   "Rotate 90°  (Ctrl+R)", "Rotate")
+        self._tb_btn(tb, self.fullscreen_button, "view-fullscreen","Full Screen  (F11)", "Full")
 
         tb.addSeparator()
 
@@ -509,14 +546,20 @@ class PDFReaderUI(QMainWindow):
         self.search_input.setPlaceholderText("🔍  Search…")
         self.search_input.setClearButtonEnabled(True)
         tb.addWidget(self.search_input)
-        self._tb_btn(tb, self.prev_search_button, "go-previous", "Previous Result")
-        self._tb_btn(tb, self.next_search_button, "go-next",     "Next Result")
+        self._tb_btn(tb, self.prev_search_button, "go-previous", "Previous Result", "Prev")
+        self._tb_btn(tb, self.next_search_button, "go-next",     "Next Result", "Next")
 
         self.setStatusBar(self.status_bar)
 
     @staticmethod
-    def _tb_btn(tb, btn, icon_name, tip):
+    def _tb_btn(tb, btn, icon_name, tip, label=""):
         btn.setIcon(QIcon.fromTheme(icon_name))
+        if label:
+            # A visible text label keeps the button usable even when the
+            # platform has no icon theme (e.g. Windows), and doubles as a
+            # low-vision aid. Toolbar-wide style/size is set in _apply_styles.
+            btn.setText(label)
+            btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
         btn.setToolTip(tip)
         btn.setAutoRaise(True)
         tb.addWidget(btn)
@@ -530,6 +573,7 @@ class PDFReaderUI(QMainWindow):
         tb.setIconSize(QSize(14, 14))
         tb.setMovable(False)
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, tb)
+        tb.setObjectName("MarkupToolBar")
         self.markup_toolbar = tb
 
         def _mk(btn, label, tip, checkable=True):
@@ -630,7 +674,7 @@ class PDFReaderUI(QMainWindow):
 
         # Restore saved splitter sizes (applied after collapse state so the
         # saved sizes correctly reflect collapsed=26 sections).
-        settings = QSettings("KeystoneAI", "PDFReaderPro")
+        settings = QSettings("LeonPriest", "PDFStudio")
         splitter_state = settings.value("nav/splitter_state")
         if splitter_state:
             self._nav_splitter.restoreState(splitter_state)
@@ -642,7 +686,7 @@ class PDFReaderUI(QMainWindow):
 
     def _save_sidebar_state(self):
         """Persist splitter sizes — call from closeEvent."""
-        settings = QSettings("KeystoneAI", "PDFReaderPro")
+        settings = QSettings("LeonPriest", "PDFStudio")
         settings.setValue("nav/splitter_state", self._nav_splitter.saveState())
 
     # =========================================================================
@@ -853,7 +897,65 @@ class PDFReaderUI(QMainWindow):
     # Styles
     # =========================================================================
 
+    # =========================================================================
+    # Appearance: themes + text size (accessibility)
+    # =========================================================================
+
+    def _load_appearance_prefs(self):
+        """Read persisted theme/size and install the bundled font (once)."""
+        st = QSettings("LeonPriest", "PDFStudio")
+        self.ui_theme = themes.resolve_theme(st.value("appearance/theme", themes.DEFAULT_THEME))
+        self.ui_size  = themes.resolve_size(st.value("appearance/size",   themes.DEFAULT_SIZE))
+        self.ui_font_family = themes.install_fonts()
+
     def _apply_styles(self):
+        if not hasattr(self, "ui_theme"):
+            self._load_appearance_prefs()
+
+        # App-wide font so unstyled dialogs also scale + use the legible face.
+        app = QApplication.instance()
+        if app is not None:
+            app.setFont(themes.app_font(self.ui_size, self.ui_font_family))
+
+        self.setStyleSheet(
+            themes.build_stylesheet(self.ui_theme, self.ui_size, self.ui_font_family)
+        )
+        self._apply_toolbar_scale()
+
+    def _apply_toolbar_scale(self):
+        """Scale toolbar icon sizes and show labels under icons."""
+        icon_px = themes.SIZE_SCALES[self.ui_size]["icon"]
+        for tb_name in ("main_toolbar", "markup_toolbar"):
+            tb = getattr(self, tb_name, None)
+            if tb is None:
+                continue
+            tb.setIconSize(QSize(icon_px, icon_px))
+        # Main toolbar buttons: labels under icons so they read + click easily.
+        if getattr(self, "main_toolbar", None) is not None:
+            from PyQt6.QtWidgets import QToolButton as _QTB
+            for b in self.main_toolbar.findChildren(_QTB):
+                if b.text():
+                    b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+
+    def set_theme(self, theme_key: str):
+        self.ui_theme = themes.resolve_theme(theme_key)
+        QSettings("LeonPriest", "PDFStudio").setValue("appearance/theme", self.ui_theme)
+        self._apply_styles()
+        self._sync_appearance_menu()
+
+    def set_ui_size(self, size_key: str):
+        self.ui_size = themes.resolve_size(size_key)
+        QSettings("LeonPriest", "PDFStudio").setValue("appearance/size", self.ui_size)
+        self._apply_styles()
+        self._sync_appearance_menu()
+
+    def _sync_appearance_menu(self):
+        for key, act in getattr(self, "_theme_actions", {}).items():
+            act.setChecked(key == self.ui_theme)
+        for key, act in getattr(self, "_size_actions", {}).items():
+            act.setChecked(key == self.ui_size)
+
+    def _apply_styles_LEGACY(self):
         self.setStyleSheet("""
             QMainWindow { background: #f0f0f0; }
 
