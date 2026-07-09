@@ -7,6 +7,10 @@ under the **Apache License 2.0** — free to use, modify, and share.
 
 ---
 
+<img width="1920" height="1080" alt="pdf_studio_light icons" src="https://github.com/user-attachments/assets/163d44cb-0c1b-48cb-8501-d73bf7025a8c" />
+
+---
+
 ## Features
 
 ### Viewing & Navigation
