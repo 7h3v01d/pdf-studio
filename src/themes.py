@@ -355,6 +355,12 @@ def build_stylesheet(theme_key: str, size_key: str, font_family: str | None = No
             padding: 4px 8px;
             font-size: {s2}px;
         }}
+
+        QMessageBox, QInputDialog {{ background: {t['chrome']}; }}
+        QMessageBox QLabel, QInputDialog QLabel {{
+            color: {t['text']};
+            font-size: {base}px;
+        }}
     """
 
 

@@ -7,10 +7,6 @@ under the **Apache License 2.0** — free to use, modify, and share.
 
 ---
 
-<img width="1920" height="1080" alt="pdf_studio_light icons" src="https://github.com/user-attachments/assets/163d44cb-0c1b-48cb-8501-d73bf7025a8c" />
-
----
-
 ## Features
 
 ### Viewing & Navigation
@@ -152,11 +148,45 @@ python pdf_reader.py
 
 ## Building a Windows .exe
 
-```bash
-buildit.bat          # runs: pyinstaller "PDF Studio.spec"
-```
-The executable appears in `src/dist/`.
+**Build in a clean, isolated venv** — this is the #1 thing that prevents build
+failures. If unrelated packages (a second Qt binding like PyQt5, pygame, your
+other projects on the path, etc.) are visible to PyInstaller, the build can pull
+them in or abort with errors like *"multiple Qt bindings packages"*.
 
+**Easiest — one command:**
+
+```bat
+build_clean.bat
+```
+
+This creates a throwaway `.buildenv`, installs *only* PDF Studio's dependencies
+plus PyInstaller, builds, and leaves the exe in `src\dist\`.
+
+**Manual, in your own venv:**
+
+```bat
+python -m venv .venv
+call .venv\Scripts\activate.bat
+python -m pip install pyinstaller
+python -m pip install -r requirements.txt
+cd src
+python -m PyInstaller "PDF Studio.spec"
+```
+
+> **Always use `python -m PyInstaller`, not `pyinstaller`.** A bare `pyinstaller`
+> command uses whichever copy is first on your PATH — often a *global* one that
+> builds against your global environment (with all its unrelated packages),
+> even when a venv is "activated". `python -m PyInstaller` uses the active
+> interpreter's PyInstaller and its packages.
+
+The executable appears in `src\dist\`.
+
+**Optional features in the .exe:** Word/Excel export and OCR need extra Python
+packages (already listed in `requirements.txt`). Whatever is installed in the
+build environment gets bundled automatically. For a leaner exe with just the
+viewer + Word export, install only `PyMuPDF PyQt6 pdf2docx pywin32` instead of
+the full `requirements.txt`. (`numpy` must remain available — `pdf2docx` needs
+it — so the spec no longer excludes it.)
 ---
 
 ## Make PDF Studio open your PDFs (Windows)
@@ -209,6 +239,15 @@ The built executable also supports the flags directly:
 ---
 
 ## Changelog
+
+### v2.7 — Build fixes
+- Build spec no longer collect_all's fontTools (which pulled in PyQt5 and aborted the build with a "multiple Qt bindings" error); excludes other Qt bindings and heavy unused packages explicitly
+- Build scripts use `python -m PyInstaller` so the active venv's PyInstaller is used, not a global one
+- Added `build_clean.bat` for a foolproof isolated build
+
+### v2.6 — Dark-mode popup + .exe export fix
+- Message-box popups (e.g. "Set as Default PDF App") now use a themed background so their text is legible in dark mode
+- Build spec now bundles optional packages (pdf2docx, etc.) when installed and no longer excludes numpy, fixing "missing pdf2docx" on Word export from the built .exe
 
 ### v2.5 — Windows file association
 - Opening a file passed on the command line now works, so double-clicking an associated PDF opens it (previously launched to a blank window)
