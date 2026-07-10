@@ -6,7 +6,7 @@ setlocal
 cd /d "%~dp0"
 
 echo Creating clean build venv (.buildenv)...
-python -m venv .buildenv
+py -3.11 -m venv .buildenv || python -m venv .buildenv
 call .buildenv\Scripts\activate.bat
 
 echo Installing build + runtime dependencies...

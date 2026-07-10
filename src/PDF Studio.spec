@@ -17,7 +17,7 @@ block_cipher = None
 # NOTE: do NOT collect_all('fontTools') — it drags in fontTools.pens.qtPen,
 # which imports PyQt5 and makes PyInstaller abort on "multiple Qt bindings".
 _extra_datas, _extra_bins, _extra_hidden = [], [], []
-for _pkg in ("pdf2docx", "tabula"):
+for _pkg in ("pdf2docx", "cv2", "fire", "tabula"):
     try:
         d, b, h = collect_all(_pkg)
         _extra_datas += d

@@ -36,13 +36,17 @@ from PyQt6.QtGui import QFont
 # ── Dependency checks ────────────────────────────────────────────────────────
 
 def _check_docx_deps() -> tuple[bool, str]:
-    missing = []
     try:
         import pdf2docx  # noqa: F401
-    except ImportError:
-        missing.append("pdf2docx  (pip install pdf2docx)")
-    if missing:
-        return False, "Missing:\n• " + "\n• ".join(missing)
+    except Exception as exc:
+        return False, (
+            "Word export needs the 'pdf2docx' package and its dependencies "
+            "(including opencv / cv2).\n\n"
+            f"Importing it failed with:\n{type(exc).__name__}: {exc}\n\n"
+            "From source, run:  pip install pdf2docx\n"
+            "In a built .exe, this usually means a dependency of pdf2docx "
+            "wasn't bundled — rebuild with the current spec."
+        )
     return True, ""
 
 

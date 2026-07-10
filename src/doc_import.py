@@ -62,6 +62,31 @@ def _on_windows() -> bool:
     return sys.platform == "win32"
 
 
+def _clean_subprocess_env():
+    """Environment safe for launching external programs from a PyInstaller build.
+
+    A frozen app prepends its unpacked temp dir (sys._MEIPASS) to PATH and sets
+    library-path variables. External programs like LibreOffice then load the
+    wrong DLLs and fail with errors such as "bootstrap.ini is corrupt".
+    Restoring the pre-PyInstaller values fixes it. Harmless from source.
+    """
+    env = dict(os.environ)
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        for var in ("PATH", "LD_LIBRARY_PATH", "DYLD_LIBRARY_PATH"):
+            orig = env.get(var + "_ORIG")
+            if orig is not None:
+                env[var] = orig
+            elif meipass and var in env:
+                parts = [
+                    p for p in env[var].split(os.pathsep)
+                    if p and os.path.normcase(os.path.abspath(p))
+                    != os.path.normcase(os.path.abspath(meipass))
+                ]
+                env[var] = os.pathsep.join(parts)
+    return env
+
+
 def _find_soffice() -> str | None:
     """Locate the LibreOffice binary on PATH or in common install dirs."""
     for name in ("soffice", "soffice.exe", "libreoffice"):
@@ -223,19 +248,24 @@ def _convert_libreoffice(src_path: str, out_pdf: str, timeout: int = 120) -> str
     profile = os.path.join(
         tempfile.gettempdir(), f"pdfstudio_lo_{uuid.uuid4().hex[:8]}"
     )
+    # A correct file URI (file:///C:/... on Windows) — a bare "file://C:\..."
+    # is malformed and LibreOffice may reject it.
+    from pathlib import Path
+    profile_uri = Path(profile).as_uri()
     cmd = [
         soffice,
         "--headless",
         "--norestore",
         "--nolockcheck",
-        f"-env:UserInstallation=file://{profile}",
+        f"-env:UserInstallation={profile_uri}",
         "--convert-to", "pdf",
         "--outdir", out_dir,
         os.path.abspath(src_path),
     ]
     try:
         proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout
+            cmd, capture_output=True, text=True, timeout=timeout,
+            env=_clean_subprocess_env(),
         )
     except subprocess.TimeoutExpired:
         raise ConversionError("LibreOffice took too long and was stopped.")
