@@ -7,6 +7,9 @@ under the **Apache License 2.0** — free to use, modify, and share.
 
 ---
 
+<img width="1920" height="1080" alt="screenshot" src="https://github.com/user-attachments/assets/7574d752-1f88-4276-9a95-f2432b81171d" />
+
+
 ## Features
 
 ### Viewing & Navigation
