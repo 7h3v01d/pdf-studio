@@ -7,10 +7,6 @@ under the **Apache License 2.0** — free to use, modify, and share.
 
 ---
 
-<img width="1920" height="1080" alt="screenshot" src="https://github.com/user-attachments/assets/cf12c2e5-e686-4748-a7e1-db300918f3f1" />
-
-
----
 ## Features
 
 ### Viewing & Navigation
@@ -243,6 +239,11 @@ The built executable also supports the flags directly:
 ---
 
 ## Changelog
+
+### v2.8 — Built-exe runtime fixes
+- LibreOffice conversion from the built .exe now works: external programs are launched with a cleaned environment (the PyInstaller temp dir is removed from PATH), fixing "bootstrap.ini is corrupt"; the LibreOffice profile now uses a valid file URI
+- Build spec now bundles pdf2docx's native dependencies (opencv/cv2, fire), fixing "missing pdf2docx" for Word export in the .exe
+- Word-export error now reports the real import failure instead of a generic message
 
 ### v2.7 — Build fixes
 - Build spec no longer collect_all's fontTools (which pulled in PyQt5 and aborted the build with a "multiple Qt bindings" error); excludes other Qt bindings and heavy unused packages explicitly
