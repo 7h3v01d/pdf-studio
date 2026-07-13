@@ -1,6 +1,6 @@
 # PDF Studio
 
-A free, full-featured PDF reader and editor built with Python and PyQt6.
+A full-featured PDF reader and editor built with Python and PyQt6.
 
 Created by **Leon Priest** ([github.com/7h3v01d](https://github.com/7h3v01d)) and released
 under the **Apache License 2.0** — free to use, modify, and share.
