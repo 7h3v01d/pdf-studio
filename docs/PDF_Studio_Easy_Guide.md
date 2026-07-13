@@ -139,6 +139,7 @@ Remember to click **Save** when you are done.
 |---|---|
 | Save your changes | Click **Save**, or press **Ctrl + S** |
 | Save as a new file (keep the original) | **File → Save As…** |
+| Check before printing | **File → Print Preview…** |
 | Print | Click **Print**, or press **Ctrl + P** |
 
 If the title bar at the top shows a **\*** , you have unsaved changes.

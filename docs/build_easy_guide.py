@@ -251,8 +251,13 @@ def build():
     s.append(TWOCOL([
         ("Save your changes", "Click <b>Save</b>, or press <b>Ctrl + S</b>"),
         ("Save as a new file<br/>(keep the original)", "<b>File \u2192 Save As\u2026</b>"),
+        ("Check before you print", "<b>File \u2192 Print Preview\u2026</b>"),
         ("Print", "Click <b>Print</b>, or press <b>Ctrl + P</b>"),
     ], header=("To do this", "Do this")))
+    s.append(Spacer(1, 8))
+    s.append(TIP("<b>Print Preview</b> shows you exactly what will come out of "
+                 "the printer <i>before</i> you print it \u2014 a good way to "
+                 "avoid wasting paper."))
     s.append(Spacer(1, 10))
     s.append(P("If the title bar at the top shows a <b>*</b>, you have unsaved "
                "changes."))

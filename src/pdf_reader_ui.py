@@ -311,6 +311,7 @@ class PDFReaderUI(QMainWindow):
         self._act_save    = QAction("&Save",       self)
         self._act_save_as = QAction("Save &As…",  self)
         self._act_print   = QAction("&Print…",    self)
+        self._act_preview = QAction("Print Pre&view…", self)
         self._act_props   = QAction("&Properties",self)
         self._act_quit    = QAction("&Quit",       self)
         self._act_save_copy = QAction("Save a &Copy…", self)
@@ -330,6 +331,7 @@ class PDFReaderUI(QMainWindow):
         # Export As submenu — actions defined after Tools menu below
         self._export_menu = file_menu.addMenu("📤  Export &As")
         file_menu.addSeparator()
+        file_menu.addAction(self._act_preview)
         file_menu.addAction(self._act_print)
         file_menu.addAction(self._act_props)
         file_menu.addSeparator()
@@ -738,6 +740,7 @@ class PDFReaderUI(QMainWindow):
         self._act_save_as.triggered.connect(self.save_pdf_as)
         self._act_save_copy.triggered.connect(self.save_a_copy)
         self._act_print.triggered.connect(self.print_pdf)
+        self._act_preview.triggered.connect(self.print_preview)
         self._act_props.triggered.connect(self.show_metadata)
         self._act_quit.triggered.connect(self.close)
         self._act_toggle_view.triggered.connect(self.toggle_view_mode)
@@ -842,6 +845,7 @@ class PDFReaderUI(QMainWindow):
         QShortcut(QKeySequence("Ctrl+O"),       self, self.open_pdf)
         QShortcut(QKeySequence("Ctrl+S"),       self, self.save_pdf)
         QShortcut(QKeySequence("Ctrl+P"),       self, self.print_pdf)
+        QShortcut(QKeySequence("Ctrl+Shift+P"), self, self.print_preview)
         QShortcut(QKeySequence("Ctrl+F"),       self, self.focus_search)
         QShortcut(QKeySequence("Ctrl+C"),       self, self.copy_selected_text)
         QShortcut(QKeySequence("Ctrl+B"),       self, self.add_bookmark)
@@ -1227,7 +1231,8 @@ class PDFReaderUI(QMainWindow):
             self.markup_color_button, self.signature_button, self.stamp_button,
             self.redact_button,
             self.add_bookmark_button, self.remove_bookmark_button,
-            self._act_save, self._act_save_as, self._act_print, self._act_props,
+            self._act_save, self._act_save_as, self._act_print, self._act_preview,
+            self._act_props,
             self._act_toggle_view, self._act_dark_mode, self._act_fullscreen,
             self._act_fit_width, self._act_fit_page,
             self._act_zoom_in, self._act_zoom_out, self._act_rotate,

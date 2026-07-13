@@ -1,14 +1,11 @@
 # PDF Studio
 
-A full-featured PDF reader and editor built with Python and PyQt6.
+A free, full-featured PDF reader and editor built with Python and PyQt6.
 
 Created by **Leon Priest** ([github.com/7h3v01d](https://github.com/7h3v01d)) and released
 under the **Apache License 2.0** — free to use, modify, and share.
 
 ---
-
-<img width="1920" height="1080" alt="screenshot" src="https://github.com/user-attachments/assets/7574d752-1f88-4276-9a95-f2432b81171d" />
-
 
 ## Features
 
@@ -233,6 +230,7 @@ The built executable also supports the flags directly:
 | `Ctrl+S` | Save | `F11` | Full screen |
 | `Ctrl+Shift+S` | Save As | `F4` | Toggle nav panel |
 | `Ctrl+P` | Print | `Ctrl+F` | Focus search |
+| `Ctrl+Shift+P` | Print preview | | |
 | `Ctrl+Q` | Quit | `F3 / Shift+F3` | Next / prev result |
 | `Ctrl+Z / Ctrl+Y` | Undo / Redo | `Ctrl+C` | Copy text |
 | `← / →` | Prev / next page | `Ctrl+B` | Add bookmark |
@@ -242,6 +240,15 @@ The built executable also supports the flags directly:
 ---
 
 ## Changelog
+
+### v3.0 — Print preview
+- **File → Print Preview…** (`Ctrl+Shift+P`) shows what will print before sending it to the printer
+- Print and preview share one rendering path, so the preview always matches the printed output
+
+### v2.9 — Printing fixed
+- **Fixed: printing produced a single blank page.** The code called `QPrinter.pageRect(QPrinter.Unit.Pixel)`, but PyQt6 has no `Unit.Pixel` (it is `DevicePixel`). The resulting AttributeError was swallowed by a bare `except`, after the print job had already been opened — so the printer received an empty job. Page geometry now comes from the painter's viewport.
+- Pages are now rendered at the printer's resolution instead of being rendered at 72 dpi and upscaled, so output is sharp rather than blocky
+- Print failures now show a real error dialog instead of a silent status-bar message
 
 ### v2.8 — Built-exe runtime fixes
 - LibreOffice conversion from the built .exe now works: external programs are launched with a cleaned environment (the PyInstaller temp dir is removed from PATH), fixing "bootstrap.ini is corrupt"; the LibreOffice profile now uses a valid file URI

@@ -1939,60 +1939,146 @@ class PDFReader(PDFReaderUI):
     # Print
     # =========================================================================
 
-    def print_pdf(self):
-        if not self.pdf_document:
-            return
+    def _ask_page_range(self):
+        """Prompt for a page range. Returns (start, end) 0-based, or None."""
         page_range, ok = QInputDialog.getText(
             self, "Print Pages",
             f"Page range (e.g. 1-5 or 'all'):",
             text=f"1-{self.total_pages}")
         if not ok:
+            return None
+        if page_range.strip().lower() == "all":
+            return 0, self.total_pages - 1
+        try:
+            if "-" in page_range:
+                s, e = map(int, page_range.split("-"))
+                start_page = max(0, s - 1)
+                end_page   = min(self.total_pages - 1, e - 1)
+            else:
+                start_page = end_page = int(page_range) - 1
+                if not (0 <= start_page < self.total_pages):
+                    raise ValueError
+        except ValueError:
+            self.status_bar.showMessage("Invalid page range")
+            return None
+        if start_page > end_page:
+            self.status_bar.showMessage("Invalid page range")
+            return None
+        return start_page, end_page
+
+    def _render_to_printer(self, printer, start_page, end_page):
+        """Paint the given page range onto a QPrinter.
+
+        Shared by Print and Print Preview so that what the user sees in the
+        preview is produced by exactly the same code that goes to the printer.
+        Raises on failure; callers report it.
+        """
+        painter = QPainter()
+        if not painter.begin(printer):
+            raise RuntimeError("Could not start the print job — the printer "
+                               "may be unavailable.")
+        try:
+            # Paint area in device pixels. The painter's viewport is already in
+            # the painter's coordinate space (unlike pageLayout().paintRectPixels(),
+            # whose origin is the margin offset).
+            target = painter.viewport()
+            dpi = printer.resolution() or 300
+
+            for pn in range(start_page, end_page + 1):
+                if pn > start_page:
+                    printer.newPage()
+
+                page = self.pdf_document.load_page(pn)
+
+                # Render at the printer's resolution rather than rendering at
+                # 72 dpi and upscaling. Cap the zoom so a huge page can't
+                # exhaust memory.
+                zoom = min(dpi / 72.0, 8.0)
+                matrix = fitz.Matrix(zoom, zoom).prerotate(self.rotation)
+                pix = page.get_pixmap(matrix=matrix, alpha=False)
+
+                fmt = (QImage.Format.Format_RGB888 if pix.n == 3
+                       else QImage.Format.Format_RGBA8888)
+                img = QImage(pix.samples, pix.width, pix.height, pix.stride, fmt)
+                if img.isNull():
+                    raise RuntimeError(f"Could not render page {pn + 1}")
+                # Copy: QImage does not own the PyMuPDF buffer, which is freed
+                # when `pix` goes out of scope.
+                pixmap = QPixmap.fromImage(img.copy())
+
+                scaled = pixmap.scaled(
+                    target.width(), target.height(),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation)
+                x = target.x() + (target.width()  - scaled.width())  // 2
+                y = target.y() + (target.height() - scaled.height()) // 2
+                painter.drawPixmap(x, y, scaled)
+        finally:
+            painter.end()
+
+    def print_preview(self):
+        """Show a print preview before sending anything to the printer."""
+        if not self.pdf_document:
             return
-        if page_range.lower() == "all":
-            start_page, end_page = 0, self.total_pages - 1
-        else:
+        rng = self._ask_page_range()
+        if rng is None:
+            return
+        start_page, end_page = rng
+
+        from PyQt6.QtPrintSupport import QPrintPreviewDialog
+
+        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        preview = QPrintPreviewDialog(printer, self)
+        preview.setWindowTitle("Print Preview")
+        # Open large: the whole point is that it can actually be seen.
+        preview.resize(1000, 800)
+
+        self._preview_error = None
+
+        def _paint(p):
             try:
-                if "-" in page_range:
-                    s, e = map(int, page_range.split("-"))
-                    start_page = max(0, s - 1)
-                    end_page   = min(self.total_pages - 1, e - 1)
-                else:
-                    start_page = end_page = int(page_range) - 1
-                    if not (0 <= start_page < self.total_pages):
-                        raise ValueError
-            except ValueError:
-                self.status_bar.showMessage("Invalid page range")
-                return
+                self._render_to_printer(p, start_page, end_page)
+            except Exception as e:
+                self._preview_error = e
+
+        preview.paintRequested.connect(_paint)
+        preview.exec()
+
+        if self._preview_error is not None:
+            e = self._preview_error
+            QMessageBox.critical(
+                self, "Preview failed",
+                f"The document could not be rendered:\n\n{type(e).__name__}: {e}")
+            self.status_bar.showMessage("Print preview failed")
+        else:
+            self.status_bar.showMessage("Print preview closed")
+
+    def print_pdf(self):
+        if not self.pdf_document:
+            return
+        rng = self._ask_page_range()
+        if rng is None:
+            return
+        start_page, end_page = rng
 
         printer = QPrinter(QPrinter.PrinterMode.HighResolution)
         dialog  = QPrintDialog(printer, self)
-        if dialog.exec() == QPrintDialog.DialogCode.Accepted:
-            try:
-                painter = QPainter()
-                if not painter.begin(printer):
-                    return
-                for pn in range(start_page, end_page + 1):
-                    if pn > start_page:
-                        printer.newPage()
-                    page   = self.pdf_document.load_page(pn)
-                    matrix = fitz.Matrix(1, 1).prerotate(self.rotation)
-                    pix    = page.get_pixmap(matrix=matrix)
-                    img    = QImage(pix.samples, pix.width, pix.height,
-                                   pix.stride, QImage.Format.Format_RGB888)
-                    pixmap = QPixmap.fromImage(img)
-                    pr     = printer.pageRect(QPrinter.Unit.Pixel)
-                    scaled = pixmap.scaled(
-                        pr.width(), pr.height(),
-                        Qt.AspectRatioMode.KeepAspectRatio,
-                        Qt.TransformationMode.SmoothTransformation)
-                    x = (pr.width()  - scaled.width())  // 2
-                    y = (pr.height() - scaled.height()) // 2
-                    painter.drawPixmap(x, y, scaled)
-                painter.end()
-                self.status_bar.showMessage(
-                    f"Printed pages {start_page + 1}–{end_page + 1}")
-            except Exception as e:
-                self.status_bar.showMessage(f"Print error: {e}")
+        if dialog.exec() != QPrintDialog.DialogCode.Accepted:
+            return
+
+        try:
+            self._render_to_printer(printer, start_page, end_page)
+            n = end_page - start_page + 1
+            self.status_bar.showMessage(
+                f"Sent {n} page{'s' if n != 1 else ''} to the printer "
+                f"({start_page + 1}\u2013{end_page + 1})")
+        except Exception as e:
+            # Report loudly: a silent status-bar message previously hid real
+            # failures behind an apparently-successful but blank print job.
+            QMessageBox.critical(
+                self, "Print failed",
+                f"The document could not be printed:\n\n{type(e).__name__}: {e}")
+            self.status_bar.showMessage("Print failed")
 
     # =========================================================================
     # Metadata / Properties

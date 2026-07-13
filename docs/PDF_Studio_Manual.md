@@ -415,8 +415,14 @@ Both run in the background with a progress bar.
 | **Save** | `Ctrl+S` | Writes changes to the current file |
 | **Save As…** | `Ctrl+Shift+S` | Saves to a new file |
 | **Save a Copy…** | — | Writes a copy, keeps editing the original |
+| **Print Preview…** | `Ctrl+Shift+P` | See exactly what will print, before printing |
 | **Print…** | `Ctrl+P` | Any system printer |
 | **Properties** | — | View document metadata |
+
+**Print Preview** (`Ctrl+Shift+P`) shows exactly what will come out of the
+printer before anything is sent, so you can check the pages and orientation
+without wasting paper. The preview is produced by the same rendering code as the
+actual print, so what you see is what you get.
 
 Annotations, markup, signatures, stamps, and form entries are all embedded on
 save. An asterisk (`*`) in the title bar indicates unsaved changes.
@@ -462,6 +468,7 @@ Or use `register_pdf.bat` / `unregister_pdf.bat`.
 | `Ctrl+S` | Save |
 | `Ctrl+Shift+S` | Save As |
 | `Ctrl+P` | Print |
+| `Ctrl+Shift+P` | Print preview |
 | `Ctrl+Q` | Quit |
 
 ### Edit
