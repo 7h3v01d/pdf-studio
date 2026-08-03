@@ -5,6 +5,8 @@ A free, full-featured PDF reader and editor built with Python and PyQt6.
 Created by **Leon Priest** ([github.com/7h3v01d](https://github.com/7h3v01d)) and released
 under the **Apache License 2.0** — free to use, modify, and share.
 
+<img width="1920" height="1080" alt="screenshot" src="https://github.com/user-attachments/assets/b7f59704-927f-45a1-963a-6b851f1633a8" />
+
 ---
 
 ## Features
