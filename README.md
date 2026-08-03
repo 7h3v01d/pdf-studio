@@ -7,8 +7,6 @@ under the **Apache License 2.0** — free to use, modify, and share.
 
 ---
 
-<img width="1920" height="1080" alt="screenshot" src="https://github.com/user-attachments/assets/0452def0-4e0b-4914-98a2-6f19cc617d66" />
-
 ## Features
 
 ### Viewing & Navigation
@@ -31,6 +29,20 @@ under the **Apache License 2.0** — free to use, modify, and share.
 - **Merge & Split** — merge multiple PDFs or split one into separate files
 - **Extract Pages** — extract a range or selection to a new PDF
 - **Password Protection** — open password-protected PDFs; encrypt saved PDFs with AES-256, set open/permissions passwords and granular permission flags
+
+### How to confirm the OCR text layer
+
+The OCR layer is intentionally invisible: the page should continue to look like
+the original scan. After OCR, open the generated `_ocr.pdf` file (or choose
+**Replace original**) and verify it in one of these ways:
+
+1. Press **Ctrl+F**, enter a word visible on the scan, and press Enter.
+2. Choose **Edit → Select All Text on Page**, then paste into Notepad.
+3. Drag across a line, press **Ctrl+C**, and paste the copied text elsewhere.
+
+PDF Studio now re-opens the saved result internally and reports the number of
+searchable words it could verify. It will no longer report a successful OCR job
+when no searchable text was embedded.
 
 ### OCR & Export
 - **OCR** — `Tools → Run OCR…` adds an invisible searchable text layer via Tesseract (all/current/custom range; language selection; background processing; save-new or overwrite)
@@ -65,6 +77,7 @@ signature_dialog.py      # Draw-your-own signature dialog
 merge_split_dialog.py    # Merge / split PDF dialog
 extract_pages_dialog.py  # Extract pages dialog
 ocr_dialog.py            # OCR settings, progress, background worker
+tesseract_setup.py       # Tesseract detection, validation, saved location
 export_dialog.py         # Export to Word / Excel with progress
 about_dialog.py          # About dialog + app metadata (APP_NAME, APP_VERSION, COMPANY_NAME)
 undo_stack.py            # Lightweight command stack
@@ -106,13 +119,20 @@ Only needed for OCR/Export. The app runs fine without them — the relevant menu
 item shows a friendly error if a dependency is missing.
 
 ### OCR  (`Tools → Run OCR…`)
-```bash
-pip install pytesseract pdf2image Pillow
-```
+
+The Python OCR components (`pytesseract` and `Pillow`) are installed from the
+main `requirements.txt` and bundled into release builds. The only external
+component is **Tesseract-OCR** itself.
+
 | Dependency | Purpose | Download |
 |---|---|---|
-| **Tesseract-OCR** | OCR engine | [Windows installer](https://github.com/UB-Mannheim/tesseract/wiki) — add to PATH |
-| **Poppler** | PDF → image for pdf2image | [poppler-windows](https://github.com/oschwartz10612/poppler-windows) — add `bin/` to PATH |
+| **Tesseract-OCR** | OCR engine | [Windows installer](https://github.com/UB-Mannheim/tesseract/wiki) |
+
+PDF Studio searches the normal Windows install locations automatically and
+configures Tesseract directly. Users do **not** need to edit the system PATH.
+If detection fails, the OCR dialog provides **Locate Tesseract…**, **Detect
+Again**, and **Get Tesseract** controls. Poppler is not required; pages are
+rendered directly with PyMuPDF.
 
 ### Export to Word
 ```bash

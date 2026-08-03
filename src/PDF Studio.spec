@@ -4,9 +4,9 @@
 #
 # Optional features (Word/Excel export, OCR) depend on extra packages. Install
 # the ones you want BEFORE building and they'll be bundled automatically:
-#     pip install pdf2docx pytesseract pdf2image Pillow tabula-py openpyxl pandas
-# (Excel export also needs Java, and OCR needs Tesseract + Poppler on the target
-#  machine — those are external programs, not Python packages.)
+#     pip install pdf2docx tabula-py openpyxl pandas
+# OCR's Python components are included in requirements.txt. The target machine
+# only needs Tesseract itself; PDF Studio auto-detects it without PATH changes.
 
 from PyInstaller.utils.hooks import collect_all
 
@@ -31,7 +31,7 @@ a = Analysis(
     pathex=[],
     binaries=_extra_bins,
     datas=[('icon.ico', '.'), ('fonts', 'fonts')] + _extra_datas,
-    hiddenimports=['register_file_types'] + _extra_hidden,
+    hiddenimports=['register_file_types', 'tesseract_setup'] + _extra_hidden,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

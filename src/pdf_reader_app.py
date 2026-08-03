@@ -2112,22 +2112,90 @@ class PDFReader(PDFReaderUI):
     def _show_ocr(self):
         if not self.pdf_document:
             return
+
+        # OCR reads the on-disk PDF. Refuse to ignore unsaved in-memory edits.
+        if self.windowTitle().startswith("*"):
+            QMessageBox.warning(
+                self,
+                "Save Before OCR",
+                "This document has unsaved changes. Save it before running OCR "
+                "so the searchable copy includes your latest edits.",
+            )
+            return
+
         from ocr_dialog import OCRDialog
         dlg = OCRDialog(
             pdf_path=self.pdf_file_path,
             total_pages=self.total_pages,
             current_page=self.current_page,
             parent=self)
-        if dlg.exec() and dlg.output_path:
-            # Reload the OCR'd document
-            reply = QMessageBox.question(
-                self, "OCR Complete",
-                f"OCR finished.\n\nOutput saved to:\n{dlg.output_path}"
-                "\n\nOpen the OCR'd document now?",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.Yes)
-            if reply == QMessageBox.StandardButton.Yes:
-                self._open_pdf_path(dlg.output_path)
+        if not dlg.exec() or not dlg.output_path:
+            return
+
+        if dlg.replace_original:
+            self._finish_ocr_replacement(
+                dlg.output_path,
+                self.pdf_file_path,
+                dlg.verified_word_count,
+            )
+            return
+
+        reply = QMessageBox.question(
+            self, "OCR Complete",
+            f"OCR finished and the text layer was verified "
+            f"({dlg.verified_word_count:,} searchable words).\n\n"
+            f"Output saved to:\n{dlg.output_path}\n\n"
+            "You are still viewing the original PDF until you open the OCR "
+            "result. Open it now?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes)
+        if reply == QMessageBox.StandardButton.Yes:
+            self._open_pdf_path(dlg.output_path)
+            self.status_bar.showMessage(
+                f"OCR text layer verified: {dlg.verified_word_count:,} words. "
+                "Press Ctrl+F to search, or use Edit → Select All Text on Page."
+            )
+
+    def _finish_ocr_replacement(self, temporary_path: str,
+                                original_path: str,
+                                verified_words: int = 0):
+        """Close the source document, atomically replace it, and reopen it."""
+        old_document = self.pdf_document
+        self.pdf_document = None
+        self.pages = []
+        self.form_fields = {}
+
+        try:
+            if old_document is not None:
+                old_document.close()
+            os.replace(temporary_path, original_path)
+        except Exception as exc:
+            # Restore a usable document even when Windows, antivirus, or file
+            # permissions prevent replacement. Keep the OCR result for recovery.
+            self._open_pdf_path(original_path)
+            QMessageBox.critical(
+                self,
+                "Could Not Replace Original",
+                "OCR completed, but PDF Studio could not replace the original "
+                f"file.\n\n{type(exc).__name__}: {exc}\n\n"
+                f"The OCR result has been kept at:\n{temporary_path}",
+            )
+            return
+
+        self._open_pdf_path(original_path)
+        QMessageBox.information(
+            self,
+            "OCR Complete",
+            "OCR finished, the searchable text layer was verified, and the "
+            "original PDF was replaced safely.\n\n"
+            f"Searchable words: {verified_words:,}\n"
+            f"{original_path}\n\n"
+            "Test it with Ctrl+F, or use Edit → Select All Text on Page.",
+        )
+        self.status_bar.showMessage(
+            f"OCR text layer verified: {verified_words:,} words. "
+            "Press Ctrl+F to search."
+        )
 
     # =========================================================================
     # Export

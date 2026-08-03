@@ -3,23 +3,24 @@ ocr_dialog.py
 -------------
 OCR dialog.
 
-Runs pytesseract + pdf2image on the open document in a background thread,
-bakes the resulting text layer back into the PDF via PyMuPDF, and re-opens
-the result so the document becomes fully searchable and copy-able.
+Runs pytesseract on pages rendered directly by PyMuPDF in a background
+thread, bakes the resulting text layer back into the PDF, and re-opens the
+result so the document becomes fully searchable and copy-able.
 
-Requirements (pip):
+Requirements (bundled in the PDF Studio build):
     pytesseract
-    pdf2image
     Pillow
 
 System:
-    Tesseract-OCR  (https://github.com/UB-Mannheim/tesseract/wiki  – Windows)
-    poppler         (for pdf2image on Windows: https://github.com/oschwartz10612/poppler-windows)
+    Tesseract-OCR  (auto-detected; it does not need to be added to PATH)
 """
 from __future__ import annotations
 import os
+import sys
+import html
 import fitz  # PyMuPDF  (https://pymupdf.readthedocs.io/)
 import tempfile
+from pathlib import Path
 
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
@@ -28,99 +29,203 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QThread, pyqtSignal
 from PyQt6.QtGui import QFont
 
+from tesseract_setup import (
+    TesseractStatus, choose_tesseract, configure_tesseract,
+    open_tesseract_download_page,
+)
+
 
 # ── Availability check ────────────────────────────────────────────────────────
 
-def _check_dependencies() -> tuple[bool, str]:
-    """Return (ok, message). ok=True means both tesseract and pdf2image work."""
-    missing = []
-    try:
-        import pytesseract
-        pytesseract.get_tesseract_version()
-    except Exception:
-        missing.append("Tesseract-OCR (not installed or not on PATH)")
-    try:
-        import pdf2image  # noqa: F401
-    except ImportError:
-        missing.append("pdf2image  (pip install pdf2image)")
+def _check_dependencies() -> tuple[bool, str, TesseractStatus]:
+    """Return readiness for the bundled OCR components and Tesseract."""
+    missing: list[str] = []
     try:
         from PIL import Image  # noqa: F401
     except ImportError:
-        missing.append("Pillow  (pip install Pillow)")
+        missing.append("The bundled Pillow imaging component is missing.")
+
+    status = configure_tesseract()
+    if not status.available:
+        missing.append(status.detail)
+
     if missing:
-        return False, "Missing dependencies:\n• " + "\n• ".join(missing)
-    return True, ""
+        return False, "OCR is not ready:\n• " + "\n• ".join(missing), status
+    return True, "", status
 
 
 # ── Worker thread ─────────────────────────────────────────────────────────────
 
 class OCRWorker(QThread):
     progress      = pyqtSignal(int, int, str)   # current, total, message
-    finished      = pyqtSignal(str)             # path to OCR'd PDF
+    finished      = pyqtSignal(str, int, int)   # path, embedded words, verified words
+    cancelled     = pyqtSignal()
     error         = pyqtSignal(str)
 
     def __init__(self, pdf_path: str, page_indices: list[int],
-                 lang: str, output_path: str):
+                 lang: str, output_path: str, tesseract_exe: str):
         super().__init__()
         self.pdf_path     = pdf_path
         self.page_indices = page_indices   # 0-based
         self.lang         = lang
         self.output_path  = output_path
+        self.tesseract_exe = tesseract_exe
         self._cancelled   = False
 
     def cancel(self):
         self._cancelled = True
 
     def run(self):
+        doc = None
         try:
             import fitz
             import pytesseract
-            from pdf2image import convert_from_path
+            from PIL import Image
 
-            doc  = fitz.open(self.pdf_path)
+            # Do not rely on PATH inside the worker thread either.
+            pytesseract.pytesseract.tesseract_cmd = self.tesseract_exe
+
+            doc = fitz.open(self.pdf_path)
             total = len(self.page_indices)
+            recognised_words = 0
+            embedded_words = 0
 
             for step, page_idx in enumerate(self.page_indices):
                 if self._cancelled:
                     doc.close()
-                    self.error.emit("OCR cancelled.")
+                    self.cancelled.emit()
                     return
 
                 self.progress.emit(step, total,
                                    f"Processing page {page_idx + 1}…")
 
-                # Render that page to a PIL image at 300 dpi
-                images = convert_from_path(
-                    self.pdf_path,
-                    dpi=300,
-                    first_page=page_idx + 1,
-                    last_page=page_idx + 1,
+                # Render directly with PyMuPDF. This removes the separate
+                # Poppler installation previously required by pdf2image.
+                page = doc.load_page(page_idx)
+                matrix = fitz.Matrix(300 / 72, 300 / 72)
+                pix = page.get_pixmap(
+                    matrix=matrix,
+                    colorspace=fitz.csRGB,
+                    alpha=False,
                 )
-                if not images:
-                    continue
-                pil_img = images[0]
+                pil_img = Image.frombytes(
+                    "RGB", (pix.width, pix.height), pix.samples)
 
                 # Run Tesseract — get hOCR (bbox-aware XML)
                 hocr_bytes = pytesseract.image_to_pdf_or_hocr(
-                    pil_img, lang=self.lang, extension="hocr")
+                    pil_img,
+                    lang=self.lang,
+                    extension="hocr",
+                    timeout=300,
+                )
 
-                # Build a tiny invisible text layer from hOCR and overlay onto page
-                self._overlay_hocr(doc, page_idx, pil_img, hocr_bytes)
+                if self._cancelled:
+                    doc.close()
+                    self.cancelled.emit()
+                    return
 
-            self.progress.emit(total, total, "Saving…")
-            doc.save(self.output_path, garbage=3, deflate=True)
-            doc.close()
-            self.finished.emit(self.output_path)
+                # Build an invisible text layer from hOCR and overlay onto page.
+                recognised, embedded, _failed = self._overlay_hocr(
+                    doc, page_idx, pil_img, hocr_bytes, self.lang)
+                recognised_words += recognised
+                embedded_words += embedded
+
+            if self._cancelled:
+                doc.close()
+                self.cancelled.emit()
+                return
+
+            if recognised_words == 0:
+                raise RuntimeError(
+                    "Tesseract completed, but it did not recognise any words on "
+                    "the selected pages. Check the OCR language, scan clarity, "
+                    "and page orientation."
+                )
+
+            if embedded_words == 0:
+                raise RuntimeError(
+                    "Tesseract recognised text, but PDF Studio could not embed "
+                    "the searchable layer. No verified OCR result was produced."
+                )
+
+            self.progress.emit(total, total, "Saving and verifying text layer…")
+            self._save_document(doc)
+            verified_words, verified_chars = self._verify_text_layer(
+                self.output_path, self.page_indices)
+            if verified_words == 0 or verified_chars == 0:
+                raise RuntimeError(
+                    "The OCR file was saved, but no searchable text could be "
+                    "read back from it. The text layer was not verified."
+                )
+
+            # A few malformed boxes may be skipped without invalidating the job,
+            # but never silently report success when every insertion failed.
+            self.finished.emit(
+                self.output_path, embedded_words, verified_words)
 
         except Exception as exc:
-            self.error.emit(str(exc))
+            self.error.emit(f"{type(exc).__name__}: {exc}")
+        finally:
+            if doc is not None:
+                try:
+                    if not doc.is_closed:
+                        doc.close()
+                except Exception:
+                    pass
+
+    def _save_document(self, doc: "fitz.Document") -> None:
+        """Save normally, or atomically replace the source when requested."""
+        source = os.path.normcase(os.path.abspath(self.pdf_path))
+        target = os.path.normcase(os.path.abspath(self.output_path))
+
+        if source != target:
+            doc.save(self.output_path, garbage=3, deflate=True)
+            doc.close()
+            return
+
+        output_dir = str(Path(self.output_path).resolve().parent)
+        fd, temp_path = tempfile.mkstemp(
+            prefix=".pdfstudio_ocr_", suffix=".pdf", dir=output_dir)
+        os.close(fd)
+        try:
+            doc.save(temp_path, garbage=3, deflate=True)
+            doc.close()
+            os.replace(temp_path, self.output_path)
+        except Exception:
+            try:
+                doc.close()
+            except Exception:
+                pass
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+            raise
+
+    @staticmethod
+    def _verify_text_layer(output_path: str,
+                           page_indices: list[int]) -> tuple[int, int]:
+        """Re-open the saved PDF and prove that searchable text exists."""
+        import fitz
+
+        verified_words = 0
+        verified_chars = 0
+        with fitz.open(output_path) as check_doc:
+            for page_idx in page_indices:
+                if not 0 <= page_idx < check_doc.page_count:
+                    continue
+                page = check_doc.load_page(page_idx)
+                words = page.get_text("words")
+                verified_words += len(words)
+                verified_chars += sum(len(str(word[4])) for word in words)
+        return verified_words, verified_chars
 
     # ── hOCR → invisible text overlay ────────────────────────────────────
 
     @staticmethod
     def _overlay_hocr(doc: "fitz.Document", page_idx: int,
-                      pil_img, hocr_bytes: bytes):
-        """Parse hOCR and insert invisible (OCR) text onto the fitz page."""
+                      pil_img, hocr_bytes: bytes, lang: str):
+        """Insert hOCR words invisibly and return recognised/embedded/fail counts."""
         import fitz
         from xml.etree import ElementTree as ET
         import re
@@ -134,7 +239,7 @@ class OCRWorker(QThread):
         sy = pg_rect.height / img_h
 
         root = ET.fromstring(hocr_bytes)
-        ns   = {"h": "http://www.w3.org/1999/xhtml"}
+        font_name = _prepare_ocr_font(page, lang)
 
         def _find_all(node, tag):
             # Walk regardless of namespace
@@ -144,6 +249,10 @@ class OCRWorker(QThread):
                 if local == tag:
                     results.append(child)
             return results
+
+        recognised = 0
+        embedded = 0
+        failures = 0
 
         words = _find_all(root, "span")
         for span in words:
@@ -155,9 +264,12 @@ class OCRWorker(QThread):
             if not m:
                 continue
             x0, y0, x1, y1 = (int(m.group(i)) for i in range(1, 5))
-            text = (span.text or "").strip()
+            # itertext() also handles hOCR producers that nest formatting
+            # elements inside the word span.
+            text = " ".join("".join(span.itertext()).split())
             if not text:
                 continue
+            recognised += 1
 
             # Convert to PDF coordinates
             rect = fitz.Rect(x0 * sx, y0 * sy, x1 * sx, y1 * sy)
@@ -169,19 +281,68 @@ class OCRWorker(QThread):
 
             # Insert invisible text (render mode 3 = invisible)
             try:
+                # insert_text expects a baseline point, not the top-left of
+                # the word box. Positioning near the lower edge keeps search
+                # highlights and drag-copy aligned with the scanned word.
+                baseline = fitz.Point(
+                    rect.x0,
+                    rect.y1 - max(0.6, rect.height * 0.12),
+                )
                 page.insert_text(
-                    rect.tl,
+                    baseline,
                     text + " ",
                     fontsize=fs,
+                    fontname=font_name,
                     color=(0, 0, 0),
                     render_mode=3,   # invisible
                     overlay=True,
                 )
+                embedded += 1
             except Exception:
-                pass  # skip malformed words silently
+                failures += 1
+
+        return recognised, embedded, failures
 
 
 # ── Language helpers ──────────────────────────────────────────────────────────
+
+# The bundled Atkinson font covers the Latin languages below. PyMuPDF also
+# supplies built-in CJK fonts. Languages needing complex script shaping (for
+# example Arabic or Devanagari) are intentionally not offered yet; silently
+# producing an empty or corrupt searchable layer would be worse than a smaller,
+# honest language list.
+_LATIN_LANGS = {
+    "eng", "fra", "deu", "spa", "ita", "por", "nld", "pol",
+    "ces", "dan", "fin", "swe", "nor", "ron", "hun", "tur",
+    "cat", "eus", "glg",
+}
+_CJK_FONTS = {
+    "chi_sim": "china-s",
+    "chi_tra": "china-t",
+    "jpn": "japan",
+    "kor": "korea",
+}
+_SUPPORTED_LANGS = _LATIN_LANGS | set(_CJK_FONTS)
+
+
+def _resource_path(relative: str) -> Path:
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent))
+    return base / relative
+
+
+def _prepare_ocr_font(page: "fitz.Page", lang: str) -> str:
+    """Return a PDF font name capable of preserving the selected script."""
+    if lang in _CJK_FONTS:
+        return _CJK_FONTS[lang]
+
+    font_file = _resource_path("fonts/AtkinsonHyperlegible-Regular.ttf")
+    if not font_file.is_file():
+        raise RuntimeError(f"Bundled OCR font is missing: {font_file}")
+
+    font_name = "PDFStudioOCR"
+    page.insert_font(fontname=font_name, fontfile=str(font_file))
+    return font_name
+
 
 _LANG_DISPLAY = {
     "eng":     "English",
@@ -192,13 +353,21 @@ _LANG_DISPLAY = {
     "por":     "Portuguese",
     "nld":     "Dutch",
     "pol":     "Polish",
-    "rus":     "Russian",
+    "ces":     "Czech",
+    "dan":     "Danish",
+    "fin":     "Finnish",
+    "swe":     "Swedish",
+    "nor":     "Norwegian",
+    "ron":     "Romanian",
+    "hun":     "Hungarian",
+    "tur":     "Turkish",
+    "cat":     "Catalan",
+    "eus":     "Basque",
+    "glg":     "Galician",
     "chi_sim": "Chinese (Simplified)",
     "chi_tra": "Chinese (Traditional)",
     "jpn":     "Japanese",
     "kor":     "Korean",
-    "ara":     "Arabic",
-    "hin":     "Hindi",
 }
 
 
@@ -206,10 +375,13 @@ def _available_langs() -> list[tuple[str, str]]:
     """Return [(code, display_name)] for installed Tesseract languages."""
     try:
         import pytesseract
+        status = configure_tesseract()
+        if not status.available:
+            return [("eng", "English")]
         codes = pytesseract.get_languages(config="")
         result = []
         for code in sorted(codes):
-            if code == "osd":
+            if code not in _SUPPORTED_LANGS:
                 continue
             result.append((code, _LANG_DISPLAY.get(code, code)))
         return result or [("eng", "English")]
@@ -236,7 +408,11 @@ class OCRDialog(QDialog):
         self.total_pages  = total_pages
         self.current_page = current_page
         self.output_path  = ""
+        self.replace_original = False
+        self.embedded_word_count = 0
+        self.verified_word_count = 0
         self._worker: OCRWorker | None = None
+        self._tesseract_status = configure_tesseract()
 
         self.setWindowTitle("Run OCR")
         self.setMinimumWidth(420)
@@ -268,6 +444,31 @@ class OCRDialog(QDialog):
         sep.setFrameShape(QFrame.Shape.HLine)
         sep.setStyleSheet("color: #ddd;")
         root.addWidget(sep)
+
+        # ── OCR engine ────────────────────────────────────────────────────
+        engine_box = QGroupBox("OCR engine")
+        engine_layout = QVBoxLayout(engine_box)
+        engine_layout.setSpacing(7)
+
+        self._engine_status = QLabel()
+        self._engine_status.setWordWrap(True)
+        engine_layout.addWidget(self._engine_status)
+
+        engine_buttons = QHBoxLayout()
+        self._btn_detect = QPushButton("Detect Again")
+        self._btn_locate = QPushButton("Locate Tesseract…")
+        self._btn_download = QPushButton("Get Tesseract")
+        engine_buttons.addWidget(self._btn_detect)
+        engine_buttons.addWidget(self._btn_locate)
+        engine_buttons.addWidget(self._btn_download)
+        engine_buttons.addStretch()
+        engine_layout.addLayout(engine_buttons)
+        root.addWidget(engine_box)
+
+        self._btn_detect.clicked.connect(self._refresh_tesseract)
+        self._btn_locate.clicked.connect(self._locate_tesseract)
+        self._btn_download.clicked.connect(open_tesseract_download_page)
+        self._update_engine_status()
 
         # ── Page scope ────────────────────────────────────────────────────
         scope_box = QGroupBox("Pages to process")
@@ -306,15 +507,14 @@ class OCRDialog(QDialog):
         lang_row.addWidget(QLabel("OCR Language:"))
         self._lang_combo = QComboBox()
         self._lang_combo.setFixedWidth(200)
-        for code, name in _available_langs():
-            self._lang_combo.addItem(name, userData=code)
+        self._reload_languages()
         lang_row.addWidget(self._lang_combo)
         lang_row.addStretch()
         root.addLayout(lang_row)
 
         # ── Output option ─────────────────────────────────────────────────
         self._cb_overwrite = QCheckBox(
-            "Replace original file  (unchecked = save as new file)")
+            "Replace original after OCR  (unchecked = save as new file)")
         self._cb_overwrite.setChecked(False)
         root.addWidget(self._cb_overwrite)
 
@@ -347,10 +547,78 @@ class OCRDialog(QDialog):
 
     # ── Slots ─────────────────────────────────────────────────────────────
 
+    def _update_engine_status(self):
+        status = self._tesseract_status
+        if status.available and status.executable:
+            version = html.escape(status.version)
+            executable = html.escape(str(status.executable))
+            self._engine_status.setText(
+                f"✓ {version}<br>"
+                f"<span style='color:#666'>{executable}</span>")
+            self._engine_status.setStyleSheet("color:#287a36;")
+        else:
+            self._engine_status.setText(
+                "✗ Tesseract is not currently available.<br>"
+                "<span style='color:#666'>No Windows PATH editing is required; "
+                "PDF Studio can use the installed executable directly.</span>")
+            self._engine_status.setStyleSheet("color:#a33;")
+
+    def _reload_languages(self):
+        selected = self._lang_combo.currentData()
+        self._lang_combo.clear()
+        for code, name in _available_langs():
+            self._lang_combo.addItem(name, userData=code)
+        if selected:
+            index = self._lang_combo.findData(selected)
+            if index >= 0:
+                self._lang_combo.setCurrentIndex(index)
+
+    def _refresh_tesseract(self):
+        self._tesseract_status = configure_tesseract()
+        self._update_engine_status()
+        self._reload_languages()
+
+    def _locate_tesseract(self):
+        status = choose_tesseract(self)
+        if status.available:
+            self._tesseract_status = status
+            self._update_engine_status()
+            self._reload_languages()
+
+    def _next_output_path(self) -> str:
+        """Avoid silently replacing an earlier OCR output file."""
+        source = Path(self.pdf_path)
+        candidate = source.with_name(f"{source.stem}_ocr{source.suffix}")
+        counter = 2
+        while candidate.exists():
+            candidate = source.with_name(
+                f"{source.stem}_ocr_{counter}{source.suffix}")
+            counter += 1
+        return str(candidate)
+
+    def _replacement_output_path(self) -> str:
+        """Create a unique sibling path; the main window replaces safely later."""
+        source = Path(self.pdf_path).resolve()
+        fd, temp_path = tempfile.mkstemp(
+            prefix=f".{source.stem}_pdfstudio_ocr_",
+            suffix=source.suffix,
+            dir=str(source.parent),
+        )
+        os.close(fd)
+        os.remove(temp_path)  # PyMuPDF requires the destination not to exist.
+        return temp_path
+
     def _run_ocr(self):
-        ok, msg = _check_dependencies()
+        ok, msg, status = _check_dependencies()
+        self._tesseract_status = status
+        self._update_engine_status()
         if not ok:
-            QMessageBox.critical(self, "Missing Dependencies", msg)
+            QMessageBox.warning(
+                self,
+                "OCR Not Ready",
+                msg + "\n\nInstall Tesseract or use ‘Locate Tesseract…’, "
+                      "then click Detect Again.",
+            )
             return
 
         pages = self._resolve_pages()
@@ -359,11 +627,14 @@ class OCRDialog(QDialog):
 
         lang = self._lang_combo.currentData() or "eng"
 
-        if self._cb_overwrite.isChecked():
-            out_path = self.pdf_path
+        self.replace_original = self._cb_overwrite.isChecked()
+        if self.replace_original:
+            # The main window still has the source PDF open. Save to a sibling
+            # temporary file now; it will close the document and atomically
+            # replace the original only after OCR has fully succeeded.
+            out_path = self._replacement_output_path()
         else:
-            base, ext = os.path.splitext(self.pdf_path)
-            out_path  = base + "_ocr" + ext
+            out_path = self._next_output_path()
 
         # UI → running state
         self._btn_run.setEnabled(False)
@@ -374,9 +645,12 @@ class OCRDialog(QDialog):
         self._progress_label.setVisible(True)
         self._progress_label.setText("Starting…")
 
-        self._worker = OCRWorker(self.pdf_path, pages, lang, out_path)
+        assert status.executable is not None
+        self._worker = OCRWorker(
+            self.pdf_path, pages, lang, out_path, str(status.executable))
         self._worker.progress.connect(self._on_progress)
         self._worker.finished.connect(self._on_finished)
+        self._worker.cancelled.connect(self._on_cancelled)
         self._worker.error.connect(self._on_error)
         self._worker.start()
 
@@ -384,27 +658,66 @@ class OCRDialog(QDialog):
         self._progress.setValue(current)
         self._progress_label.setText(msg)
 
-    def _on_finished(self, out_path: str):
+    def _on_finished(self, out_path: str, embedded_words: int,
+                     verified_words: int):
         self.output_path = out_path
+        self.embedded_word_count = embedded_words
+        self.verified_word_count = verified_words
+        self._worker = None
         self._progress.setValue(self._progress.maximum())
-        self._progress_label.setText("Done ✓")
+        self._progress_label.setText(
+            f"Done ✓  Searchable text verified ({verified_words:,} words). "
+            "Open the OCR result, then press Ctrl+F to test it."
+        )
         self._btn_cancel.setText("Close")
         self._btn_cancel.clicked.disconnect()
         self._btn_cancel.clicked.connect(self.accept)
         self._btn_run.setEnabled(False)
 
+    def _on_cancelled(self):
+        worker = self._worker
+        self._worker = None
+        self._remove_replacement_temp(worker)
+        super().reject()
+
     def _on_error(self, msg: str):
+        worker = self._worker
+        self._worker = None
+        self._remove_replacement_temp(worker)
         self._progress.setVisible(False)
         self._progress_label.setVisible(False)
         self._btn_run.setEnabled(True)
         self._btn_cancel.setText("Cancel")
         QMessageBox.critical(self, "OCR Error", msg)
 
+    def _remove_replacement_temp(self, worker: OCRWorker | None):
+        if not self.replace_original or worker is None:
+            return
+        try:
+            Path(worker.output_path).unlink(missing_ok=True)
+        except OSError:
+            pass
+
     def _on_cancel(self):
         if self._worker and self._worker.isRunning():
             self._worker.cancel()
-            self._worker.wait(2000)
-        self.reject()
+            self._btn_cancel.setEnabled(False)
+            self._progress_label.setVisible(True)
+            self._progress_label.setText(
+                "Stopping after the current OCR operation…")
+            return
+        super().reject()
+
+    def reject(self):
+        """Do not destroy the dialog while its worker thread is still active."""
+        self._on_cancel()
+
+    def closeEvent(self, event):
+        if self._worker and self._worker.isRunning():
+            self._on_cancel()
+            event.ignore()
+            return
+        super().closeEvent(event)
 
     # ── Helpers ───────────────────────────────────────────────────────────
 

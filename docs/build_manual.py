@@ -66,6 +66,14 @@ S = {
 
 
 def esc(t):
+    # ReportLab's WinAnsi paragraph path cannot reliably render several UI
+    # symbols used in the Markdown source. Use clear ASCII equivalents in the
+    # generated manual rather than shipping missing-glyph squares.
+    t = t.translate(str.maketrans({
+        "—": " - ", "–": "-", "…": "...", "→": ">", "←": "<",
+        "−": "-", "◉": "(selected)", "✍": "Signature",
+        "✏": "Edit", "⬛": "Redaction", "📌": "Note",
+    }))
     return t.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
 

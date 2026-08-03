@@ -2,10 +2,11 @@
 PyMuPDF>=1.23.0
 PyQt6>=6.5.0
 
-# Optional — OCR (Tools > Run OCR). Also needs system Tesseract + Poppler on PATH.
-# pytesseract
-# pdf2image
-# Pillow
+# OCR support bundled into PDF Studio.
+# The separate Tesseract OCR application is auto-detected at runtime and does
+# not need to be added to the Windows PATH.
+pytesseract>=0.3.10
+Pillow>=10.0.0
 
 # Optional — Export to Word (File > Export As > Word)
 # pdf2docx

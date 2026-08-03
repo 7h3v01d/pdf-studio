@@ -86,7 +86,7 @@ and will tell you what is missing if you try to use one.
 | Open Word / Excel | *(none)* | **Microsoft Office** (best fidelity) or **LibreOffice** |
 | Export to Word | `pdf2docx` | — |
 | Export to Excel | `tabula-py`, `openpyxl`, `pandas` | **Java** |
-| OCR | `pytesseract`, `pdf2image`, `Pillow` | **Tesseract-OCR**, **Poppler** |
+| OCR | `pytesseract`, `Pillow` | **Tesseract-OCR** (auto-detected; no PATH edit) |
 
 ---
 
@@ -385,8 +385,11 @@ becomes searchable and selectable.
 4. Run. Processing happens in the background with a progress bar — the app
    stays usable.
 
-**Requirements:** `pytesseract`, `pdf2image`, `Pillow`, plus **Tesseract-OCR**
-and **Poppler** installed and on the system `PATH`.
+**Requirements:** `pytesseract` and `Pillow` are bundled with PDF Studio.
+Install **Tesseract-OCR** normally; PDF Studio detects and configures it directly,
+so no system `PATH` editing is required. If automatic detection misses a custom
+installation, use **Locate Tesseract…** in the OCR dialog. Poppler is no longer
+required because PDF Studio renders pages directly through PyMuPDF.
 
 ---
 
@@ -561,7 +564,10 @@ If you see this, you are running an older build — rebuild from current source.
 It has no text layer. Run **Tools → Run OCR…** (§15).
 
 **OCR fails**
-Confirm **Tesseract-OCR** and **Poppler** are installed and on your `PATH`.
+Open **Tools → Run OCR…** and check the OCR engine panel. PDF Studio searches
+standard Tesseract install locations automatically and does not require a
+`PATH` change. Use **Locate Tesseract…** for a custom install, or **Get
+Tesseract** if it is not installed. Poppler is not required.
 
 **Excel export fails**
 Confirm **Java** is installed.
@@ -591,7 +597,7 @@ Licensed under the **Apache License, Version 2.0**. See `LICENSE.txt`.
 | **PyQt6** | GPL-3.0 / commercial (Riverbank) |
 | **Atkinson Hyperlegible** | SIL Open Font License 1.1 — © 2020 Braille Institute of America |
 
-Optional: `pdf2docx`, `pytesseract`, `pdf2image`, `Pillow`, `tabula-py`,
+Optional: `pdf2docx`, `tabula-py`,
 `openpyxl`, `pandas`, `pywin32`.
 
 See `NOTICE` for full attributions.
