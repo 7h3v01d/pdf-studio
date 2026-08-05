@@ -64,6 +64,9 @@ from scan_text_edit_core import (
     MODE_REDACT as SCAN_MODE_REDACT,
     ScanTextReplacement,
     apply_scan_text_replacement,
+    choose_drag_endpoint,
+    drag_rectangle_is_large_enough,
+    inverted_fitz_matrix,
     remove_overlay_replacement,
     sample_background_rgb,
 )
@@ -958,11 +961,11 @@ class PDFReader(PDFReaderUI):
             return
         matrix = fitz.Matrix(self.zoom_level, self.zoom_level).prerotate(self.rotation)
         try:
-            inv = matrix.invert()
+            inv = inverted_fitz_matrix(matrix)
         except ValueError:
             return
 
-        # Click/drop point → PDF coordinates
+        # Click/drop point -> PDF coordinates
         pdf_pt = fitz.Point(click_x, click_y) * inv
 
         # Size in PDF points, aspect-preserved, capped to half the page width
@@ -1060,7 +1063,7 @@ class PDFReader(PDFReaderUI):
             return
         matrix = fitz.Matrix(self.zoom_level, self.zoom_level).prerotate(self.rotation)
         try:
-            inv = matrix.invert()
+            inv = inverted_fitz_matrix(matrix)
         except ValueError:
             return
         pdf_pt = fitz.Point(click_x, click_y) * inv
@@ -2861,7 +2864,7 @@ class PDFReader(PDFReaderUI):
     def _to_pdf_point(self, px, py):
         matrix = fitz.Matrix(self.zoom_level, self.zoom_level).prerotate(self.rotation)
         try:
-            return fitz.Point(px, py) * matrix.invert()
+            return fitz.Point(px, py) * inverted_fitz_matrix(matrix)
         except ValueError:
             return None
 
@@ -2996,7 +2999,7 @@ class PDFReader(PDFReaderUI):
             if len(self._freehand_points) >= 2:
                 matrix = fitz.Matrix(self.zoom_level, self.zoom_level)
                 try:
-                    inv = matrix.invert()
+                    inv = inverted_fitz_matrix(matrix)
                 except ValueError:
                     inv = fitz.Matrix(1, 1)
                 pdf_pts = []
@@ -3027,25 +3030,68 @@ class PDFReader(PDFReaderUI):
         if (self.is_selecting_text and
                 self.active_tool == TOOL_SCAN_TEXT and
                 event.button() == Qt.MouseButton.LeftButton):
+            # Capture every usable endpoint *before* releasing the widget mouse
+            # grab. On Windows, event.position() can collapse back to the press
+            # point during release even though mouse-move events drew a valid
+            # rectangle. Preserve the last move point and also map the global
+            # release position back into page-widget coordinates.
+            start_point = self.selection_start_point
+            previous_end = self.selection_end_point
+            release_end = event.position().toPoint()
+            try:
+                global_end = page_widget.mapFromGlobal(
+                    event.globalPosition().toPoint()
+                )
+            except (AttributeError, RuntimeError):
+                global_end = None
+
             self._release_scan_text_mouse_grab()
             self.is_selecting_text = False
-            self.selection_end_point = event.position().toPoint()
             pdf_rect = None
-            if (self.selection_start_point and
-                    abs(self.selection_start_point.x() - self.selection_end_point.x()) > 5 and
-                    abs(self.selection_start_point.y() - self.selection_end_point.y()) > 5):
-                pdf_rect = self._widget_coords_to_pdf_rect(
-                    page_widget, self.selection_start_point, self.selection_end_point
+
+            if start_point is not None:
+                end_x, end_y = choose_drag_endpoint(
+                    (start_point.x(), start_point.y()),
+                    (previous_end.x(), previous_end.y())
+                    if previous_end is not None else None,
+                    (release_end.x(), release_end.y()),
+                    (global_end.x(), global_end.y())
+                    if global_end is not None else None,
                 )
+                chosen_end = QPoint(round(end_x), round(end_y))
+                self.selection_end_point = chosen_end
+                if drag_rectangle_is_large_enough(
+                    (start_point.x(), start_point.y()),
+                    (chosen_end.x(), chosen_end.y()),
+                ):
+                    candidate = self._widget_coords_to_pdf_rect(
+                        page_widget, start_point, chosen_end
+                    )
+                    if candidate is not None and not candidate.is_empty:
+                        pdf_rect = fitz.Rect(candidate)
+
             self.selection_start_point = None
             self.selection_end_point = None
             self.current_selection_page = -1
             self.update_view()
-            if pdf_rect:
-                self._begin_scan_text_edit(page_num, pdf_rect)
+
+            if pdf_rect is not None:
+                # Let the mouse-release event return to Qt before creating a
+                # progress dialog or starting OCR. This avoids another class of
+                # Windows event-loop handoff failures.
+                rect_values = tuple(pdf_rect)
+                self.status_bar.showMessage(
+                    "Selection captured. Preparing scanned-text editor..."
+                )
+                QTimer.singleShot(
+                    0,
+                    lambda page=int(page_num), rect=rect_values:
+                        self._begin_scan_text_edit(page, rect),
+                )
             else:
                 self.status_bar.showMessage(
-                    "Drag a rectangle around the scanned text you want to replace."
+                    "The selection was not captured. Drag a box with visible "
+                    "width and height around the scanned text."
                 )
             return
 
@@ -3257,10 +3303,12 @@ class PDFReader(PDFReaderUI):
         y1 = min(pixmap_size.height(), max(sy, ey))
         matrix = fitz.Matrix(self.zoom_level, self.zoom_level).prerotate(self.rotation)
         try:
-            inv = matrix.invert()
+            inv = inverted_fitz_matrix(matrix)
         except ValueError:
             return None
-        return fitz.Rect(x0, y0, x1, y1) * inv
+        result = fitz.Rect(x0, y0, x1, y1) * inv
+        result.normalize()
+        return result
 
     def copy_selected_text(self):
         if (not self.selection_start_point or

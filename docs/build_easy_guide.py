@@ -241,9 +241,10 @@ def build():
                "area rather than pretending the original letters are editable."))
     s.append(STEP(1, "Click <b>Edit Text</b> in the <b>EDIT SCAN</b> group."))
     s.append(STEP(2, "Drag a tight box around the word, number, or short line, "
-                     "then release the mouse button."))
-    s.append(STEP(3, "A <b>Preparing Scanned-Text Editor</b> window appears "
-                     "immediately while PDF Studio reads only that selected area. "
+                     "then release the mouse button. The bottom status briefly "
+                     "says <b>Selection captured</b>."))
+    s.append(STEP(3, "A <b>Preparing Scanned-Text Editor</b> window then appears "
+                     "while PDF Studio reads only that selected area. "
                      "This first version reads English automatically; for other "
                      "languages, type the replacement manually."))
     s.append(STEP(4, "Check the recognised text and type the corrected version."))

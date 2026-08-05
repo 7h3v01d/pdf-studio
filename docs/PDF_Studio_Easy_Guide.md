@@ -122,8 +122,8 @@ editing hidden original letters.
 
 1. Click **Edit Text** in the **EDIT SCAN** group at the top.
 2. Drag a box closely around the word, number, or short line to change, then
-   release the mouse button.
-3. A **Preparing Scanned-Text Editor** window appears immediately while PDF
+   release the mouse button. The bottom status briefly says **Selection captured**.
+3. A **Preparing Scanned-Text Editor** window then appears while PDF
    Studio reads only that small area. This first version reads
    English automatically; for other languages, type the replacement manually.
 4. Check the recognised text and type the corrected version.

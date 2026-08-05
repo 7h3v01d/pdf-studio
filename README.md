@@ -1,9 +1,9 @@
 # PDF Studio
 
-> **Phase 4.1 reliability fix:** scanned-text selection now retains the mouse
-> through release, displays an immediate OCR progress window, performs one
-> Tesseract recognition pass instead of two, and always opens the manual editor
-> if OCR ends without a usable result.
+> **Phase 4.2 Windows selection fix:** scanned-text editing now preserves the
+> last valid drag endpoint when Windows / Qt reports a collapsed mouse-release
+> position. OCR starts only after the release event returns to the event loop,
+> preventing a visible selection from being discarded before the editor opens.
 
 
 A free, full-featured PDF reader and editor built with Python and PyQt6.
@@ -399,6 +399,22 @@ The built executable also supports the flags directly:
 ---
 
 ## Changelog
+
+### v3.2-alpha4 - PDF coordinate conversion correction
+
+- Corrected PyMuPDF matrix inversion throughout page-coordinate conversion.
+- Scanned-text selections now retain their real PDF rectangle instead of collapsing to an empty box.
+- Also repairs click placement for signatures and stamps, freehand coordinate persistence, and point-based markup lookup.
+- Added regression tests proving inverse matrices map points and rectangles correctly.
+
+### v3.2-alpha3 - Windows drag-release handoff fix
+
+- Preserve the last valid mouse-move endpoint instead of blindly trusting a collapsed Windows release coordinate.
+- Map the global release position back into page coordinates as an independent fallback.
+- Choose the endpoint that represents the largest completed drag rectangle.
+- Start OCR on the next Qt event-loop turn after mouse release.
+- Show an explicit **Selection captured** status before preparing the editor.
+- Added drag-endpoint and minimum-selection regression tests.
 
 ### v3.2-alpha2 — scanned-text editor handoff reliability
 

@@ -22,6 +22,21 @@ VALID_ALIGNMENTS = {ALIGN_LEFT, ALIGN_CENTER, ALIGN_RIGHT}
 PDFSTUDIO_SUBJECT = "PDF Studio scan text replacement"
 
 
+def inverted_fitz_matrix(matrix: fitz.Matrix) -> fitz.Matrix:
+    """Return an inverted copy of a PyMuPDF matrix.
+
+    ``Matrix.invert()`` mutates the matrix and returns an integer status code;
+    it does *not* return the inverse matrix.  Keeping this detail behind one
+    helper prevents valid page selections and placement points from being
+    multiplied by the success code ``0`` and collapsing to the origin.
+    """
+    inverse = fitz.Matrix(matrix)
+    status = inverse.invert()
+    if status != 0:
+        raise ValueError("The PDF render matrix could not be inverted.")
+    return inverse
+
+
 @dataclass(frozen=True)
 class ScanTextReplacement:
     page_number: int
@@ -147,6 +162,55 @@ def sample_background_rgb(image, *, border_fraction: float = 0.12) -> tuple[floa
         medians.append(ordered[len(ordered) // 2] / 255.0)
     return normalise_color(medians)
 
+
+
+def choose_drag_endpoint(
+    start: Sequence[float],
+    *candidates: Sequence[float] | None,
+) -> tuple[float, float]:
+    """Return the endpoint that best represents a completed drag.
+
+    Some Windows / Qt combinations can report the mouse-release position back
+    at (or very close to) the press position after a widget mouse grab is
+    released. The last mouse-move position is still valid in that case. Choose
+    the candidate enclosing the largest rectangle from ``start`` instead of
+    blindly trusting the release event.
+    """
+    sx, sy = float(start[0]), float(start[1])
+    valid: list[tuple[float, float]] = []
+    for candidate in candidates:
+        if candidate is None:
+            continue
+        try:
+            x, y = float(candidate[0]), float(candidate[1])
+        except (TypeError, ValueError, IndexError):
+            continue
+        valid.append((x, y))
+
+    if not valid:
+        return sx, sy
+
+    def score(point: tuple[float, float]) -> tuple[float, float]:
+        dx = abs(point[0] - sx)
+        dy = abs(point[1] - sy)
+        # Rectangle area is the primary signal. Squared distance breaks ties
+        # for very thin drags without changing the conservative size gate.
+        return dx * dy, dx * dx + dy * dy
+
+    return max(valid, key=score)
+
+
+def drag_rectangle_is_large_enough(
+    start: Sequence[float],
+    end: Sequence[float],
+    *,
+    minimum_pixels: float = 5.0,
+) -> bool:
+    """Return whether a drag has useful width and height in widget pixels."""
+    return (
+        abs(float(start[0]) - float(end[0])) > float(minimum_pixels)
+        and abs(float(start[1]) - float(end[1])) > float(minimum_pixels)
+    )
 
 
 def ocr_text_and_confidence(data: dict) -> tuple[str, float]:

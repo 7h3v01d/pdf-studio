@@ -1,6 +1,6 @@
 # PDF Studio — User Manual
 
-**Version 3.2-alpha2** · Free and open source · Apache License 2.0
+**Version 3.2-alpha4** · Free and open source · Apache License 2.0
 Leon Priest — [github.com/7h3v01d](https://github.com/7h3v01d)
 
 ---
@@ -406,9 +406,11 @@ native Word-style editing.
 1. Click **Edit Text** in the **EDIT SCAN** toolbar group, or choose
    **Tools → Edit Scanned Text...**.
 2. Drag a rectangle tightly around the word, number, or line to change, then
-   release the mouse button. PDF Studio retains the page selection until release
-   even if the pointer leaves the exact text area.
-3. A **Preparing Scanned-Text Editor** progress window appears immediately. PDF
+   release the mouse button. PDF Studio validates the visible selection and
+   converts its display-pixel bounds into the matching PDF-page coordinates
+   before starting OCR.
+3. The status briefly reports **Selection captured**, followed by a
+   **Preparing Scanned-Text Editor** progress window. PDF
    Studio uses an existing text layer when one is present. For an image-only
    scan, it sends only the selected region to Tesseract OCR in one recognition
    pass. Selected-region

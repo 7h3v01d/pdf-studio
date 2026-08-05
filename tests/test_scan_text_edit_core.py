@@ -9,7 +9,10 @@ from scan_text_edit_core import (
     MODE_REDACT,
     ScanTextReplacement,
     apply_scan_text_replacement,
+    choose_drag_endpoint,
+    drag_rectangle_is_large_enough,
     fit_font_size,
+    inverted_fitz_matrix,
     ocr_text_and_confidence,
     remove_overlay_replacement,
     sample_background_rgb,
@@ -221,3 +224,47 @@ def test_ocr_data_tolerates_missing_layout_columns():
     )
     assert text == "Alpha\nBeta"
     assert confidence == pytest.approx(90.0)
+
+
+def test_drag_endpoint_preserves_last_move_when_release_collapses_to_start():
+    endpoint = choose_drag_endpoint(
+        (100, 100),
+        (260, 145),  # last visible mouse-move endpoint
+        (101, 101),  # faulty Windows release endpoint
+    )
+    assert endpoint == (260.0, 145.0)
+    assert drag_rectangle_is_large_enough((100, 100), endpoint)
+
+
+def test_drag_endpoint_uses_release_when_it_extends_the_selection():
+    endpoint = choose_drag_endpoint(
+        (100, 100),
+        (220, 135),
+        (280, 155),
+    )
+    assert endpoint == (280.0, 155.0)
+
+
+def test_drag_size_gate_rejects_clicks_and_one_dimensional_strokes():
+    assert not drag_rectangle_is_large_enough((10, 10), (12, 13))
+    assert not drag_rectangle_is_large_enough((10, 10), (100, 13))
+    assert not drag_rectangle_is_large_enough((10, 10), (13, 100))
+    assert drag_rectangle_is_large_enough((10, 10), (100, 40))
+
+
+def test_inverted_fitz_matrix_returns_matrix_not_status_code():
+    render = fitz.Matrix(2.0, 4.0)
+    inverse = inverted_fitz_matrix(render)
+    assert isinstance(inverse, fitz.Matrix)
+    mapped = fitz.Point(200, 120) * inverse
+    assert mapped.x == pytest.approx(100.0)
+    assert mapped.y == pytest.approx(30.0)
+
+
+def test_inverted_fitz_matrix_keeps_selection_rectangle_nonempty():
+    render = fitz.Matrix(2.0, 2.0)
+    inverse = inverted_fitz_matrix(render)
+    selected_pixels = fitz.Rect(40, 60, 260, 120)
+    selected_pdf = selected_pixels * inverse
+    assert not selected_pdf.is_empty
+    assert tuple(selected_pdf) == pytest.approx((20.0, 30.0, 130.0, 60.0))
