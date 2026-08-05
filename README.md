@@ -1,4 +1,4 @@
-<img width="900" height="275" alt="banner" src="docs/images/splascreen.png" />
+<img width="900" height="275" alt="banner" src="docs/images/banner.png" />
 
 **A Windows-first PDF reader and editor built with Python, PyQt6, and PyMuPDF.**
 
