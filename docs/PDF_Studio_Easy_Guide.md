@@ -55,22 +55,94 @@ You can also open **Word** documents (`.docx`) and **Excel** spreadsheets
 | Find a word | Click the **Search** box, type the word, press **Enter** |
 
 The panel on the left shows the **Contents**, your **Bookmarks**, any **notes**
-you have made, and small **pictures of each page**. Click a page picture to jump
+you have made, any **form fields**, and small **pictures of each page**. Click a page picture to jump
 straight to it.
 
 ---
 
 ## Filling in a form
 
-If a document has boxes to fill in, PDF Studio shows them with a light blue
-outline.
+When a PDF already has fillable boxes, PDF Studio outlines them in light blue
+and opens a **Forms** section in the panel on the left.
 
-1. **Click** the box you want to fill in.
-2. **Type** your answer.
-3. Tick boxes and choose from drop-down lists the same way — just click them.
-4. When you are finished, click **Save**.
+1. **Click** a field and type your answer.
+2. Tick boxes, choose radio buttons, or select from drop-down and list fields.
+3. Double-click a field in the Forms panel when you need PDF Studio to jump to it.
+4. Click **Save** when finished. A `*` beside the document name means changes
+   have not been saved yet.
 
-That's it. There is no special "form mode" to turn on.
+The Forms panel can **Reset Page**, **Reset All**, or turn the blue highlights
+off. **Flatten Form to Copy…** makes a separate finished copy that cannot be
+edited accidentally; your original fillable PDF stays untouched.
+
+### Let PDF Studio suggest the fields
+
+For many scanned forms, PDF Studio can make a careful first guess:
+
+1. Open the **Forms** section on the left.
+2. Under **Smart Form Detection**, leave the setting on **Balanced**.
+3. Click **Detect Current Page...**.
+4. A large review window opens. Select each row to match it with the coloured
+   box on the page.
+5. Untick anything that looks wrong. The table shows the type, label, confidence,
+   and reason for every suggestion.
+6. Click **Create Checked**, then confirm.
+7. If you close the window, use **Review Suggestions...** in Forms to reopen it.
+8. Use Design mode to move or resize anything that needs adjustment.
+9. Save the PDF.
+
+Nothing is added until you approve it. **Clear** removes the suggestions without
+changing the document. For a difficult page, try **More suggestions**; for a
+cleaner, stricter result, choose **High confidence**.
+
+### Make a scanned form fillable manually
+
+A scanned paper form starts as a picture, but Form Designer can add real
+interactive fields to it:
+
+1. Open the **Forms** section and tick **Design mode**.
+2. Pick **Text Field**, **Checkbox**, **Dropdown**, **Date**, **Yes / No**,
+   **Signature**, or **Initials**.
+3. Click or drag where the field belongs.
+4. Click **Select** to move or resize it.
+5. Use **Properties...** to name it, make it required, or enter dropdown choices
+   one per line.
+6. Click **Save**, turn Design mode off, and fill the new form normally.
+
+> Keep the original scan as a backup. Signature and initials controls are
+> unsigned PDF signature placeholders; PDF Studio does not yet apply
+> certificate-backed signatures.
+
+---
+
+## Correcting words or numbers in a scan
+
+A scanned page is a picture, so PDF Studio replaces a selected area rather than
+editing hidden original letters.
+
+1. Click **Edit Text** in the **EDIT SCAN** group at the top.
+2. Drag a box closely around the word, number, or short line to change, then
+   release the mouse button.
+3. A **Preparing Scanned-Text Editor** window appears immediately while PDF
+   Studio reads only that small area. This first version reads
+   English automatically; for other languages, type the replacement manually.
+4. Check the recognised text and type the corrected version.
+5. Leave **Auto fit** on unless the preview text is too large or too small.
+6. Check the preview, then choose one of these:
+   - **Reversible white-out overlay** - safest and recommended. The original scan
+     stays underneath, `Ctrl+Z` works, and the replacement can be deleted from
+     the Annotations list.
+   - **Permanent erase + replacement** - removes everything inside the selected
+     box before adding the new text. Use this only when you are sure.
+7. Click **Apply Replacement**.
+
+For a permanent replacement, PDF Studio makes you use **Save As** with a new
+filename. This protects the original and writes a clean edited copy. If OCR cannot
+read the area or ends unexpectedly, the editor still opens so you can type the
+replacement yourself.
+
+> Draw a tight box. Permanent mode can remove parts of nearby lines or pictures
+> that touch the selection. Start with the reversible option when unsure.
 
 ---
 

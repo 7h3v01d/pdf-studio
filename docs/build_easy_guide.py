@@ -173,29 +173,93 @@ def build():
         ("Go back a page", "Click <b>Prev</b>, or press the <b>left arrow</b> key"),
         ("Jump to a page", "Type the page number in the toolbar box, press <b>Enter</b>"),
         ("Make the page bigger", "Click <b>Zoom +</b>"),
-        ("Make the page smaller", "Click <b>Zoom \u2212</b>"),
+        ("Make the page smaller", "Click <b>Zoom -</b>"),
         ("Fit the whole page", "Click <b>Fit Pg</b>"),
         ("Fit the width", "Click <b>Fit W</b>"),
         ("Find a word", "Click <b>Search</b>, type the word, press <b>Enter</b>"),
     ], header=("To do this", "Do this")))
     s.append(Spacer(1, 10))
     s.append(P("The panel on the left shows the <b>Contents</b>, your "
-               "<b>Bookmarks</b>, any <b>notes</b> you have made, and small "
-               "<b>pictures of each page</b>. Click a page picture to jump "
-               "straight to it."))
+               "<b>Bookmarks</b>, any <b>notes</b>, any <b>form fields</b>, and "
+               "small <b>pictures of each page</b>. Click a page picture or form "
+               "field to jump straight to it."))
 
     # 4. Forms
     s.append(H1("Filling in a form"))
-    s.append(P("If a document has boxes to fill in, PDF Studio shows them with "
-               "a light blue outline."))
-    s.append(STEP(1, "<b>Click</b> the box you want to fill in."))
-    s.append(STEP(2, "<b>Type</b> your answer."))
-    s.append(STEP(3, "Tick boxes and choose from drop-down lists the same way — "
-                     "just click them."))
-    s.append(STEP(4, "When you are finished, click <b>Save</b>."))
-    s.append(P("That's it. There is no special \u201cform mode\u201d to turn on."))
+    s.append(P("When a PDF already has fillable boxes, PDF Studio outlines them "
+               "in light blue and opens a <b>Forms</b> section on the left."))
+    s.append(STEP(1, "<b>Click</b> a field and type your answer."))
+    s.append(STEP(2, "Tick boxes, choose radio buttons, or select from drop-down "
+                     "and list fields."))
+    s.append(STEP(3, "Double-click a field in the <b>Forms</b> panel when you want "
+                     "PDF Studio to jump to it."))
+    s.append(STEP(4, "Click <b>Save</b> when finished. A <b>*</b> beside the name "
+                     "means changes are not saved yet."))
+    s.append(P("The Forms panel can <b>Reset Page</b>, <b>Reset All</b>, or turn "
+               "the blue highlights off."))
+    s.append(TIP("<b>Flatten Form to Copy…</b> makes a separate finished copy "
+                 "that cannot be edited accidentally. Your original fillable "
+                 "PDF stays untouched."))
+    s.append(H2("Let PDF Studio suggest the fields"))
+    s.append(P("For many scanned forms, PDF Studio can make a careful first guess."))
+    s.append(STEP(1, "Open the <b>Forms</b> section on the left."))
+    s.append(STEP(2, "Under <b>Smart Form Detection</b>, leave the setting on "
+                     "<b>Balanced</b>."))
+    s.append(STEP(3, "Click <b>Detect Current Page...</b>."))
+    s.append(STEP(4, "A large review window opens. Select each row to match it "
+                     "with the coloured box on the page."))
+    s.append(STEP(5, "Untick anything that looks wrong. The table shows the type, "
+                     "label, confidence, and reason for every suggestion."))
+    s.append(STEP(6, "Click <b>Create Checked</b>, then confirm."))
+    s.append(STEP(7, "If you close the window, use <b>Review Suggestions...</b> "
+                     "in Forms to reopen it."))
+    s.append(STEP(8, "Use Design mode to move or resize anything that needs adjustment."))
+    s.append(STEP(9, "Save the PDF."))
+    s.append(TIP("Nothing is added until you approve it. <b>Clear</b> removes the "
+                 "suggestions without changing the document. Try <b>More suggestions</b> "
+                 "for a difficult page or <b>High confidence</b> for a stricter result."))
 
-    # 5. Signing
+    s.append(H2("Make a scanned form fillable manually"))
+    s.append(P("A scanned paper form starts as a picture. Form Designer can add "
+               "real interactive fields to it."))
+    s.append(STEP(1, "Open the <b>Forms</b> section and tick <b>Design mode</b>."))
+    s.append(STEP(2, "Pick <b>Text Field</b>, <b>Checkbox</b>, <b>Dropdown</b>, "
+                     "<b>Date</b>, <b>Yes / No</b>, <b>Signature</b>, or <b>Initials</b>."))
+    s.append(STEP(3, "Click or drag where the field belongs."))
+    s.append(STEP(4, "Click <b>Select</b>. Drag a field to move it, or drag the small "
+                     "square at its lower-right corner to resize it."))
+    s.append(STEP(5, "Click <b>Properties...</b> to name the field, make it required, "
+                     "or enter dropdown choices one per line."))
+    s.append(STEP(6, "Click <b>Save</b>, turn Design mode off, and fill the new form."))
+    s.append(TIP("Keep the original scan as a backup. Signature and initials controls "
+                 "are unsigned PDF signature placeholders; PDF Studio does not yet "
+                 "apply certificate-backed signatures."))
+
+    # 5. Scanned-text correction
+    s.append(H1("Correcting words or numbers in a scan"))
+    s.append(P("A scanned page is a picture. PDF Studio replaces a selected "
+               "area rather than pretending the original letters are editable."))
+    s.append(STEP(1, "Click <b>Edit Text</b> in the <b>EDIT SCAN</b> group."))
+    s.append(STEP(2, "Drag a tight box around the word, number, or short line, "
+                     "then release the mouse button."))
+    s.append(STEP(3, "A <b>Preparing Scanned-Text Editor</b> window appears "
+                     "immediately while PDF Studio reads only that selected area. "
+                     "This first version reads English automatically; for other "
+                     "languages, type the replacement manually."))
+    s.append(STEP(4, "Check the recognised text and type the corrected version."))
+    s.append(STEP(5, "Leave <b>Auto fit</b> on unless the preview is too large "
+                     "or too small."))
+    s.append(STEP(6, "Choose <b>Reversible white-out overlay</b> for the safest "
+                     "correction, or permanent mode only when you are sure."))
+    s.append(STEP(7, "Click <b>Apply Replacement</b>."))
+    s.append(TIP("The reversible choice keeps the original scan underneath, "
+                 "works with Ctrl+Z, and can be removed from Annotations. "
+                 "Permanent mode forces Save As under a new filename so the "
+                 "original remains safe."))
+    s.append(P("If OCR cannot read the area or ends unexpectedly, the editor "
+               "still opens so you can type the replacement manually."))
+
+    # 6. Signing
     s.append(H1("Signing a document"))
     s.append(P("You have two ways to add your signature. Both work the same "
                "once it is on the page — it becomes part of the document when "
@@ -208,7 +272,7 @@ def build():
                  "the page</b> and drop it where you want the signature to go. "
                  "That's all — it is placed for you."))
     s.append(P("<b>Or, using the button:</b>"))
-    s.append(STEP(1, "Click <b>\u270d Signature</b> on the toolbar."))
+    s.append(STEP(1, "Click <b>Signature</b> on the toolbar."))
     s.append(STEP(2, "Choose <b>Import image file</b>."))
     s.append(STEP(3, "Click <b>Choose image\u2026</b> and pick your signature "
                      "picture."))
@@ -220,7 +284,7 @@ def build():
                      "should go."))
 
     s.append(H2("Way 2 — Draw it with the mouse"))
-    s.append(STEP(1, "Click <b>\u270d Signature</b> on the toolbar."))
+    s.append(STEP(1, "Click <b>Signature</b> on the toolbar."))
     s.append(STEP(2, "Make sure <b>Draw signature</b> is selected."))
     s.append(STEP(3, "Draw your signature in the white box using the mouse. If "
                      "you don't like it, click <b>Clear</b> and try again."))
@@ -231,27 +295,27 @@ def build():
     s.append(P("Click <b>Save</b>. The signature is now part of the document."))
     s.append(TIP("Made a mistake? Press <b>Ctrl + Z</b> to undo it."))
 
-    # 6. Markup
+    # 7. Markup
     s.append(H1("Marking up a document"))
     s.append(P("Click any of these buttons on the toolbar, then use the mouse "
                "on the page:"))
-    s.append(BUL("<b>\U0001F4CC Note</b> — click the page to leave a sticky note."))
+    s.append(BUL("<b>Note</b> — click the page to leave a sticky note."))
     s.append(BUL("<b>Highlight</b> — drag across text to highlight it."))
     s.append(BUL("<b>Underline</b> — drag across text to underline it."))
     s.append(BUL("<b>Strikethrough</b> — drag across text to cross it out."))
-    s.append(BUL("<b>\u270f Draw</b> — draw freely on the page with the mouse."))
+    s.append(BUL("<b>Draw</b> — draw freely on the page with the mouse."))
     s.append(BUL("<b>Eraser</b> — remove marks you have made."))
-    s.append(P("The coloured <b>\u25c9</b> button changes the colour."))
+    s.append(P("The coloured <b>colour</b> button changes the colour."))
     s.append(TIP("When you are finished with a tool, press the <b>Esc</b> key "
                  "(top-left of the keyboard) to put it down."))
     s.append(P("Remember to click <b>Save</b> when you are done."))
 
-    # 7. Save / print
+    # 8. Save / print
     s.append(H1("Saving and printing"))
     s.append(TWOCOL([
         ("Save your changes", "Click <b>Save</b>, or press <b>Ctrl + S</b>"),
-        ("Save as a new file<br/>(keep the original)", "<b>File \u2192 Save As\u2026</b>"),
-        ("Check before you print", "<b>File \u2192 Print Preview\u2026</b>"),
+        ("Save as a new file<br/>(keep the original)", "<b>File &gt; Save As...</b>"),
+        ("Check before you print", "<b>File &gt; Print Preview...</b>"),
         ("Print", "Click <b>Print</b>, or press <b>Ctrl + P</b>"),
     ], header=("To do this", "Do this")))
     s.append(Spacer(1, 8))
@@ -262,7 +326,7 @@ def build():
     s.append(P("If the title bar at the top shows a <b>*</b>, you have unsaved "
                "changes."))
 
-    # 8. Troubleshooting
+    # 9. Troubleshooting
     s.append(H1("If something goes wrong"))
     s.append(H2("I made a mistake."))
     s.append(P("Press <b>Ctrl + Z</b> to undo. You can press it several times "
@@ -271,7 +335,7 @@ def build():
     s.append(P("See <b>Making it comfortable to read</b> at the start of this "
                "guide, and choose <b>Extra Large</b>."))
     s.append(H2("I can't see the buttons clearly."))
-    s.append(P("Try the other colour scheme: <b>View \u2192 Appearance</b>, and "
+    s.append(P("Try the other colour scheme: <b>View &gt; Appearance</b>, and "
                "switch between <b>High-Contrast Light</b> and "
                "<b>Dark Industrial</b>."))
     s.append(H2("The mouse is doing something odd on the page."))
@@ -282,7 +346,7 @@ def build():
                "open, the computer may need Microsoft Word or LibreOffice "
                "installed. Ask Leon."))
 
-    # 9. Keys
+    # 10. Keys
     s.append(H1("The most useful keys"))
     s.append(TWOCOL([
         ("<b>Ctrl + S</b>", "Save"),
@@ -291,7 +355,7 @@ def build():
         ("<b>Ctrl + F</b>", "Find a word"),
         ("<b>Left / Right arrows</b>", "Previous / next page"),
         ("<b>Ctrl + +</b>", "Bigger"),
-        ("<b>Ctrl + \u2212</b>", "Smaller"),
+        ("<b>Ctrl + -</b>", "Smaller"),
         ("<b>Esc</b>", "Put down the current tool"),
     ], header=("Key", "What it does")))
     s.append(Spacer(1, 16))

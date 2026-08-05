@@ -1,6 +1,6 @@
 # PDF Studio — User Manual
 
-**Version 2.8** · Free and open source · Apache License 2.0
+**Version 3.2-alpha2** · Free and open source · Apache License 2.0
 Leon Priest — [github.com/7h3v01d](https://github.com/7h3v01d)
 
 ---
@@ -17,18 +17,19 @@ Leon Priest — [github.com/7h3v01d](https://github.com/7h3v01d)
 8. [Annotations and markup](#8-annotations-and-markup)
 9. [Signatures and stamps](#9-signatures-and-stamps)
 10. [Filling in forms](#10-filling-in-forms)
-11. [Redactions](#11-redactions)
-12. [Managing pages](#12-managing-pages)
-13. [Merging, splitting, extracting](#13-merging-splitting-extracting)
-14. [Password protection](#14-password-protection)
-15. [OCR — making scans searchable](#15-ocr--making-scans-searchable)
-16. [Exporting to Word and Excel](#16-exporting-to-word-and-excel)
-17. [Saving and printing](#17-saving-and-printing)
-18. [File associations (Windows)](#18-file-associations-windows)
-19. [Keyboard shortcuts](#19-keyboard-shortcuts)
-20. [Building from source](#20-building-from-source)
-21. [Troubleshooting](#21-troubleshooting)
-22. [Licence and credits](#22-licence-and-credits)
+11. [Editing text in scanned pages](#11-editing-text-in-scanned-pages)
+12. [Redactions](#12-redactions)
+13. [Managing pages](#13-managing-pages)
+14. [Merging, splitting, extracting](#14-merging-splitting-extracting)
+15. [Password protection](#15-password-protection)
+16. [OCR — making scans searchable](#16-ocr--making-scans-searchable)
+17. [Exporting to Word and Excel](#17-exporting-to-word-and-excel)
+18. [Saving and printing](#18-saving-and-printing)
+19. [File associations (Windows)](#19-file-associations-windows)
+20. [Keyboard shortcuts](#20-keyboard-shortcuts)
+21. [Building from source](#21-building-from-source)
+22. [Troubleshooting](#22-troubleshooting)
+23. [Licence and credits](#23-licence-and-credits)
 
 ---
 
@@ -46,6 +47,7 @@ Apache License 2.0.
 - View, annotate, mark up, and sign PDFs
 - Fill in interactive PDF forms
 - Insert, delete, reorder, rotate, merge, split, and extract pages
+- Replace selected text in scans with reversible or permanent edits
 - Apply true redactions
 - AES-256 password protection
 - OCR scanned documents to make them searchable
@@ -287,45 +289,177 @@ Signatures and stamps are embedded permanently on **Save**.
 
 ---
 
-## 10. Filling in forms
+## 10. Filling in existing PDF forms
 
-If a PDF contains interactive form fields, PDF Studio renders them as live
-controls over the page, outlined in light blue, pre-populated with any existing
-values.
+PDF Studio automatically detects interactive **AcroForm** fields already built
+into a PDF. It places live controls over the page and lists every field in the
+**Forms** section of the left navigation panel. Double-click a listed field to
+jump to it.
 
 | Field type | Behaviour |
 |---|---|
 | Text (single-line) | Click and type |
-| Text (multi-line) | Click and type |
-| Checkbox | Click to tick / untick |
-| Radio button | Click to select |
-| Dropdown (combo) | Click and choose |
+| Text (multi-line) | Click and type multiple lines |
+| Checkbox | Click to tick or untick |
+| Radio button | Click to select within its group |
+| Dropdown (combo) | Open and choose an option |
+| List box | Select one visible option |
+| Signature field | Detected and identified; cryptographic signing is not yet supported |
+| PDF push button | Shown but disabled; embedded actions and JavaScript are not executed |
 
-- Values are written back into the PDF as you edit.
-- Field text scales with the **Text Size** setting (§4).
-- Fields reposition correctly when you zoom or resize.
-- **Tools → Reset Form Fields** clears the form.
+Fillable fields are outlined in blue by default. Read-only fields have a distinct
+appearance and cannot be changed. Turn **Highlight fillable fields** off in the
+Forms panel when you want an unobstructed page view; the controls remain usable.
 
-Click **Save** to commit your entries.
+### Forms panel commands
 
-**Known limitations:** list-box fields are not yet supported, and complex radio
-groups with custom export values may not map perfectly.
+- **Reset Page** restores fields on the current page to their PDF defaults.
+- **Reset All** restores every field in the document.
+- **Flatten Form to Copy…** creates a separate non-editable PDF with the current
+  answers permanently drawn onto the pages. PDF Studio verifies that no live
+  widgets remain and never overwrites the editable original.
+
+Form changes immediately mark the document with an unsaved `*`. Press **Save**
+or `Ctrl+S` to persist them. If you close PDF Studio or open another file while
+changes remain, choose **Save**, **Discard**, or **Cancel** from the warning.
+
+> Flatten only when the completed copy no longer needs to be edited. Keep the
+> original form for later corrections.
+
+**Current limitation:** multi-select list boxes are detected, but this release
+saves one selected item because the current PDF engine does not reliably write
+multiple list values.
+
+### Creating fields with Form Designer
+
+Form Designer turns an ordinary PDF or scanned paper form into a genuine
+interactive AcroForm. Open the **Forms** section and enable **Design mode**.
+While Design mode is active, the normal fill controls are replaced by field
+outlines so editing the structure cannot accidentally change an answer.
+
+1. Choose **Text Field** and drag a rectangle where typed text should appear.
+2. Choose **Checkbox** and click or drag where a tick box should appear.
+3. Choose **Dropdown**, place it, then use **Properties...** to enter one choice
+   per line and decide whether users may type a custom value.
+4. Choose **Date** for a DD/MM/YYYY field with an in-app calendar picker.
+5. Choose **Yes / No** to create two linked radio buttons.
+6. Choose **Signature** or **Initials** to create genuine unsigned PDF signature
+   fields.
+7. Choose **Select**, then drag a field to move it or drag the solid lower-right
+   handle to resize it.
+8. Use **Properties...** to set the name, tooltip, required/read-only state, and
+   any type-specific options.
+9. Use **Delete Field** to remove the selected field. Deleting either member of
+   a Yes / No pair removes the complete linked group.
+10. Press **Save**, then disable Design mode to test normal filling.
+
+A short click creates a sensible default-sized field. Dragged and moved fields
+are constrained to page boundaries, and automatic names avoid collisions.
+Field names must remain unique.
+
+> Form Designer creates real PDF form widgets. It does not paint fake boxes on
+> top of the page. Signature and initials controls are unsigned placeholders for
+> signing in a compatible PDF application; PDF Studio does not yet perform
+> certificate-backed signing.
+
+### Detecting likely fields automatically
+
+The **Smart Form Detection** section in the Forms panel can analyse the current
+page before you place fields manually:
+
+1. Choose a confidence level: **More suggestions**, **Balanced**, or **High confidence**.
+2. Click **Detect Current Page...**.
+3. Wait for the current-page analysis to finish. PDF Studio uses the existing
+   text layer when possible; image-only pages are read with Tesseract OCR.
+4. The resizable **Review Smart Form Suggestions** window opens automatically.
+   Each row shows the proposed type, detected label, confidence, and why it was
+   suggested. Selecting a row highlights the matching outline on the page.
+5. Untick any incorrect or unwanted suggestions. Use **Check All**, **Uncheck All**,
+   or **Check 80%+** when useful.
+6. Click **Create Checked** and confirm. The approved suggestions become genuine
+   AcroForm fields and mark the document as unsaved.
+7. If you close the review window without creating fields, reopen it with
+   **Review Suggestions...** in the Forms panel. **Clear** removes the previews.
+8. Use Form Designer to move, resize, rename, or correct the created fields.
+9. Save the PDF.
+
+Detection combines recognised labels with visible answer lines, rectangles, and
+checkbox squares. A suggestion supported by both text and geometry receives a
+higher confidence score. When PDF Studio recognises a likely label but must infer
+where the answer belongs, the suggestion is intentionally scored lower.
+
+No suggestion changes the PDF until **Create Checked** is confirmed. Existing
+fields suppress overlapping suggestions, and **Clear** removes all previews
+without modifying the document. Detailed review no longer competes for space in
+the navigation rail: the sidebar shows a compact status and the Forms body is
+scrollable when space is limited. The detector is an assistant, not an automatic
+claim of perfect form understanding; ambiguous layouts still require review.
 
 ---
 
-## 11. Redactions
+## 11. Editing text in scanned pages
+
+A scan is an image, not a collection of editable letters. PDF Studio therefore
+uses a controlled region-replacement workflow rather than claiming to provide
+native Word-style editing.
+
+1. Click **Edit Text** in the **EDIT SCAN** toolbar group, or choose
+   **Tools → Edit Scanned Text...**.
+2. Drag a rectangle tightly around the word, number, or line to change, then
+   release the mouse button. PDF Studio retains the page selection until release
+   even if the pointer leaves the exact text area.
+3. A **Preparing Scanned-Text Editor** progress window appears immediately. PDF
+   Studio uses an existing text layer when one is present. For an image-only
+   scan, it sends only the selected region to Tesseract OCR in one recognition
+   pass. Selected-region
+   OCR currently uses Tesseract's English model; for other languages, type the
+   replacement manually in the editor.
+4. Review the recognised text and type the corrected replacement.
+5. Adjust font size (**Auto fit** is the safest default), alignment, text colour,
+   and background colour. The initial background is sampled from the edge pixels
+   of the selected region.
+6. Check the live replacement preview and choose an application mode.
+
+### Reversible white-out overlay
+
+This is the recommended mode. It creates one opaque FreeText annotation over the
+scan while leaving the original pixels intact. The replacement can be undone with
+`Ctrl+Z`, redone with `Ctrl+Y`, or removed from the **Annotations** panel. It saves
+like an ordinary annotation.
+
+### Permanent erase and replacement
+
+This mode removes PDF text, line art, and image pixels inside the selected
+rectangle, then burns in the replacement text. It cannot be undone in the current
+editing session. PDF Studio requires **Save As** and writes a new compact PDF
+under a different filename. This prevents removed content from remaining in an
+incremental PDF revision and preserves the original source file.
+
+> Keep selections tight. A permanent replacement removes text and blanks image
+> pixels within the selected rectangle; overlapping vector line art may also be
+> affected. Use extra care around nearby rules, borders, and pictures.
+> Use the reversible overlay whenever a non-destructive correction is sufficient.
+
+If OCR is unavailable, times out, ends unexpectedly, or cannot read the
+selection, the editor still opens and allows manual replacement text. Tesseract is therefore helpful but not a hard
+blocker for the replacement operation.
+
+---
+
+## 12. Redactions
 
 1. Select the redaction tool and drag a box over the content to remove.
 2. Repeat for each area.
 3. **Tools → Apply Redactions**.
 
 > **Applying a redaction is permanent and irreversible.** The underlying text and
-> images are removed from the file, not merely covered. Always keep an
-> unredacted original (**File → Save a Copy…**) before applying.
+> images are removed, not merely covered. After applying, PDF Studio requires
+> **Save As** and writes a clean file under a new name so the original remains
+> available and removed content is not retained in an incremental revision.
 
 ---
 
-## 12. Managing pages
+## 13. Managing pages
 
 From the **Pages** menu:
 
@@ -342,7 +476,7 @@ All page operations are undoable (`Ctrl+Z`), including drag-reordering.
 
 ---
 
-## 13. Merging, splitting, extracting
+## 14. Merging, splitting, extracting
 
 **Tools → Merge / Split PDFs…**
 
@@ -355,7 +489,7 @@ leaving the original untouched.
 
 ---
 
-## 14. Password protection
+## 15. Password protection
 
 **Tools → Password Protect…**
 
@@ -371,7 +505,7 @@ Protection is applied when you save.
 
 ---
 
-## 15. OCR — making scans searchable
+## 16. OCR — making scans searchable
 
 A scanned page is just an image: you cannot search or copy from it. OCR adds an
 **invisible text layer** beneath the image, so the page looks identical but
@@ -393,7 +527,7 @@ required because PDF Studio renders pages directly through PyMuPDF.
 
 ---
 
-## 16. Exporting to Word and Excel
+## 17. Exporting to Word and Excel
 
 **File → Export As →**
 
@@ -411,7 +545,7 @@ Both run in the background with a progress bar.
 
 ---
 
-## 17. Saving and printing
+## 18. Saving and printing
 
 | Action | Shortcut | Notes |
 |---|---|---|
@@ -432,7 +566,7 @@ save. An asterisk (`*`) in the title bar indicates unsaved changes.
 
 ---
 
-## 18. File associations (Windows)
+## 19. File associations (Windows)
 
 To make Windows open PDFs in PDF Studio:
 
@@ -462,7 +596,7 @@ Or use `register_pdf.bat` / `unregister_pdf.bat`.
 
 ---
 
-## 19. Keyboard shortcuts
+## 20. Keyboard shortcuts
 
 ### File
 | Shortcut | Action |
@@ -505,7 +639,7 @@ Or use `register_pdf.bat` / `unregister_pdf.bat`.
 
 ---
 
-## 20. Building from source
+## 21. Building from source
 
 Build in a **clean, isolated environment**. If unrelated packages are visible to
 PyInstaller (a second Qt binding such as PyQt5, other projects on your path,
@@ -545,7 +679,7 @@ box, and menus. The executable's name is set in `src/PDF Studio.spec`.
 
 ---
 
-## 21. Troubleshooting
+## 22. Troubleshooting
 
 **A Word/Excel document won't open**
 Install **Microsoft Office** (best fidelity) or **LibreOffice** (free). Large
@@ -561,7 +695,12 @@ Fixed in v2.8. External programs are now launched with a cleaned environment.
 If you see this, you are running an older build — rebuild from current source.
 
 **Scanned PDF can't be searched**
-It has no text layer. Run **Tools → Run OCR…** (§15).
+It has no text layer. Run **Tools → Run OCR…** (§16).
+
+**The scan text replacement does not match the original font**
+PDF Studio estimates a safe Helvetica size and background colour, but a scan does
+not contain reusable font information. Adjust font size, alignment, and colours in
+the preview. Use the reversible overlay first when matching is uncertain.
 
 **OCR fails**
 Open **Tools → Run OCR…** and check the OCR engine panel. PDF Studio searches
@@ -584,7 +723,7 @@ A markup tool is active. Press `Esc`.
 
 ---
 
-## 22. Licence and credits
+## 23. Licence and credits
 
 **PDF Studio** — Copyright © 2025 Leon Priest.
 Licensed under the **Apache License, Version 2.0**. See `LICENSE.txt`.

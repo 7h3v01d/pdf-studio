@@ -9,6 +9,7 @@ Supported command kinds
   annotation_remove     sticky note erased
   markup_add            highlight / underline / strikethrough / freehand / signature added
   markup_remove         markup stroke erased
+  scan_text_overlay     reversible scanned-text replacement added / removed
   stamp_add             text stamp baked onto page
   page_add              blank page inserted
   page_remove           page deleted

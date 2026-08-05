@@ -43,6 +43,8 @@ TYPE_META = {
     "pdf_strike":    ("S̶",  "#6b7280"),
     "pdf_ink":       ("✏",  "#8b5cf6"),
     "pdf_text":      ("📌", "#f59e0b"),
+    "pdf_freetext":  ("T",  "#2563eb"),
+    "pdf_replacement": ("T", "#0f766e"),
     "pdf_other":     ("◆",  "#64748b"),
 }
 
@@ -190,6 +192,7 @@ class AnnotationsPanel(QWidget):
 
         # ── 4. Native PDF annotations (from fitz) ────────────────────────
         PDF_TYPE_MAP = {
+            2:  "pdf_freetext",   # FreeText
             8:  "pdf_text",       # Text / sticky note
             9:  "pdf_highlight",
             10: "pdf_underline",
@@ -200,8 +203,14 @@ class AnnotationsPanel(QWidget):
             page = pdf_document.load_page(page_num)
             for annot in page.annots():
                 atype_int = annot.type[0]
-                atype     = PDF_TYPE_MAP.get(atype_int, "pdf_other")
-                content   = annot.info.get("content", "") or annot.info.get("title", "")
+                info = annot.info or {}
+                atype = PDF_TYPE_MAP.get(atype_int, "pdf_other")
+                if (
+                    atype_int == 2
+                    and info.get("subject") == "PDF Studio scan text replacement"
+                ):
+                    atype = "pdf_replacement"
+                content = info.get("content", "") or info.get("title", "")
                 all_items.append({
                     "source":  "pdf",
                     "type":    atype,
@@ -316,5 +325,7 @@ def _type_label(t: str) -> str:
         "pdf_strike":    "Strikethrough",
         "pdf_ink":       "Ink / Drawing",
         "pdf_text":      "Text Note",
+        "pdf_freetext":  "Free Text",
+        "pdf_replacement": "Scanned Text Replacement",
         "pdf_other":     "Annotation",
     }.get(t, t.replace("_", " ").title())

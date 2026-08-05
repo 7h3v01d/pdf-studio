@@ -18,6 +18,7 @@ from about_dialog import APP_NAME, AboutDialog
 import themes
 from merge_split_dialog import MergeSplitDialog
 from annotations_panel import AnnotationsPanel
+from forms_panel import FormsPanel
 
 SINGLE_PAGE = 0
 CONTINUOUS  = 1
@@ -267,6 +268,7 @@ class PDFReaderUI(QMainWindow):
         self.signature_button     = QToolButton()
         self.stamp_button         = QToolButton()
         self.redact_button        = QToolButton()
+        self.scan_text_button      = QToolButton()
 
         # Legacy compat: logic in pdf_reader_app.py references these
         self.view_mode_button   = QPushButton("Continuous")
@@ -284,6 +286,7 @@ class PDFReaderUI(QMainWindow):
         self.toc_list        = QListWidget()
         self.bookmark_list   = QListWidget()
         self.annot_panel     = AnnotationsPanel()
+        self.forms_panel     = FormsPanel()
 
         # Status
         self.status_bar = QStatusBar()
@@ -452,7 +455,14 @@ class PDFReaderUI(QMainWindow):
         self._act_password      = QAction("&Password Protect…",      self)
         self._act_extract_pages = QAction("&Extract Pages…",         self)
         self._act_apply_redact  = QAction("Apply &Redactions",       self)
-        self._act_reset_form    = QAction("&Reset Form Fields",      self)
+        self._act_edit_scan_text = QAction("Edit &Scanned Text…",      self, checkable=True)
+        self._act_reset_form    = QAction("Reset Form Fields on &Page", self)
+        self._act_reset_all_forms = QAction("Reset &All Form Fields", self)
+        self._act_flatten_form  = QAction("&Flatten Form to Copy…", self)
+        self._act_form_designer = QAction("Form &Designer Mode", self, checkable=True)
+        self._act_detect_form_fields = QAction("Detect Form Fields on Current &Page…", self)
+        self._act_form_properties = QAction("Selected Field &Properties…", self)
+        self._act_delete_form_field = QAction("&Delete Selected Form Field", self)
         self._act_ocr           = QAction("🔍  Run &OCR…",           self)
         self._act_merge_split.setIcon(QIcon.fromTheme("document-new"))
         self._act_extract_pages.setIcon(QIcon.fromTheme("document-save"))
@@ -461,9 +471,17 @@ class PDFReaderUI(QMainWindow):
         tools_menu.addAction(self._act_extract_pages)
         tools_menu.addAction(self._act_password)
         tools_menu.addSeparator()
+        tools_menu.addAction(self._act_edit_scan_text)
         tools_menu.addAction(self._act_apply_redact)
         tools_menu.addSeparator()
         tools_menu.addAction(self._act_reset_form)
+        tools_menu.addAction(self._act_reset_all_forms)
+        tools_menu.addAction(self._act_flatten_form)
+        tools_menu.addSeparator()
+        tools_menu.addAction(self._act_form_designer)
+        tools_menu.addAction(self._act_detect_form_fields)
+        tools_menu.addAction(self._act_form_properties)
+        tools_menu.addAction(self._act_delete_form_field)
         tools_menu.addSeparator()
         tools_menu.addAction(self._act_ocr)
 
@@ -616,6 +634,11 @@ class PDFReaderUI(QMainWindow):
         _mk(self.stamp_button,     "⬛ Stamp",      "Insert a text stamp", checkable=False)
 
         tb.addSeparator()
+        _pill(tb, "EDIT SCAN")
+        _mk(self.scan_text_button, "Edit Text",
+            "Drag around scanned text, OCR it, then replace it safely")
+
+        tb.addSeparator()
         _pill(tb, "REDACT")
         _mk(self.redact_button, "⬛ Redact", "Drag a box to mark text/area for redaction\nThen use Tools → Apply Redactions")
 
@@ -660,6 +683,19 @@ class PDFReaderUI(QMainWindow):
         self._nav_contents    = NavSection("📑", "CONTENTS",    self.toc_list,      "nav/contents")
         self._nav_bookmarks   = NavSection("🔖", "BOOKMARKS",   bm_body,            "nav/bookmarks")
         self._nav_annotations = NavSection("💬", "ANNOTATIONS", self.annot_panel,   "nav/annotations")
+
+        # Forms contains several independent workflows. When the splitter gives
+        # it limited height, scroll rather than compressing controls until labels
+        # and buttons overlap.
+        self._forms_scroll = QScrollArea()
+        self._forms_scroll.setObjectName("FormsScrollArea")
+        self._forms_scroll.setWidgetResizable(True)
+        self._forms_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._forms_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self._forms_scroll.setWidget(self.forms_panel)
+        self._nav_forms       = NavSection("📝", "FORMS",       self._forms_scroll,  "nav/forms")
         self._nav_thumbnails  = NavSection("🖼", "THUMBNAILS",  self.thumbnail_list, "nav/thumbnails")
 
         # ── Splitter ──────────────────────────────────────────────────────
@@ -669,15 +705,16 @@ class PDFReaderUI(QMainWindow):
         self._nav_splitter.addWidget(self._nav_contents)
         self._nav_splitter.addWidget(self._nav_bookmarks)
         self._nav_splitter.addWidget(self._nav_annotations)
+        self._nav_splitter.addWidget(self._nav_forms)
         self._nav_splitter.addWidget(self._nav_thumbnails)
 
         # Default proportional sizes (pixels) — thumbnails gets the most space
-        self._nav_splitter.setSizes([140, 130, 130, 300])
+        self._nav_splitter.setSizes([115, 105, 105, 165, 260])
 
         # Now that all sections are parented to the splitter, restore collapsed
         # state — this must happen AFTER addWidget() so parent() is valid.
         for sec in (self._nav_contents, self._nav_bookmarks,
-                    self._nav_annotations, self._nav_thumbnails):
+                    self._nav_annotations, self._nav_forms, self._nav_thumbnails):
             sec.post_splitter_init()
 
         # Restore saved splitter sizes (applied after collapse state so the
@@ -762,7 +799,18 @@ class PDFReaderUI(QMainWindow):
         self._act_password.triggered.connect(self.show_password_dialog)
         self._act_extract_pages.triggered.connect(self._show_extract_pages)
         self._act_apply_redact.triggered.connect(self.apply_redactions)
+        self._act_edit_scan_text.triggered.connect(
+            lambda: self.set_markup_tool("scan_text")
+        )
         self._act_reset_form.triggered.connect(self.reset_form)
+        self._act_reset_all_forms.triggered.connect(self.reset_all_forms)
+        self._act_flatten_form.triggered.connect(self.flatten_form_to_copy)
+        self._act_form_designer.toggled.connect(self.set_form_design_mode)
+        self._act_detect_form_fields.triggered.connect(
+            lambda: self.detect_form_fields_current_page(0.65)
+        )
+        self._act_form_properties.triggered.connect(self.edit_selected_form_properties)
+        self._act_delete_form_field.triggered.connect(self.delete_selected_form_field)
         self._act_about.triggered.connect(self._show_about)
         self._act_shortcuts.triggered.connect(self._show_shortcuts_help)
         self._act_ocr.triggered.connect(self._show_ocr)
@@ -770,6 +818,27 @@ class PDFReaderUI(QMainWindow):
             lambda: self._show_export("docx"))
         self._act_export_xlsx.triggered.connect(
             lambda: self._show_export("xlsx"))
+
+        # Forms panel
+        self.forms_panel.jump_to_field.connect(self.jump_to_form_field)
+        self.forms_panel.highlight_changed.connect(self.set_form_highlighting)
+        self.forms_panel.reset_page_requested.connect(self.reset_form)
+        self.forms_panel.reset_all_requested.connect(self.reset_all_forms)
+        self.forms_panel.flatten_copy_requested.connect(self.flatten_form_to_copy)
+        self.forms_panel.design_mode_changed.connect(self.set_form_design_mode)
+        self.forms_panel.designer_tool_requested.connect(self.set_form_designer_tool)
+        self.forms_panel.field_selected.connect(self.select_form_field)
+        self.forms_panel.delete_selected_requested.connect(self.delete_selected_form_field)
+        self.forms_panel.properties_requested.connect(self.edit_selected_form_properties)
+        self.forms_panel.detect_page_requested.connect(
+            self.detect_form_fields_current_page
+        )
+        self.forms_panel.review_suggestions_requested.connect(
+            self.show_form_detection_review
+        )
+        self.forms_panel.clear_suggestions_requested.connect(
+            self.clear_form_suggestions
+        )
 
         # Main toolbar
         self.open_button.clicked.connect(self.open_pdf)
@@ -806,6 +875,9 @@ class PDFReaderUI(QMainWindow):
         self.signature_button.clicked.connect(self.place_signature)
         self.stamp_button.clicked.connect(self.place_stamp)
         self.redact_button.clicked.connect(lambda: self.set_markup_tool("redact"))
+        self.scan_text_button.clicked.connect(
+            lambda: self.set_markup_tool("scan_text")
+        )
 
         # Sidebar
         self.thumbnail_list.itemClicked.connect(self.thumbnail_clicked)
@@ -1229,7 +1301,7 @@ class PDFReaderUI(QMainWindow):
             self.underline_button, self.strikethrough_button,
             self.freehand_button, self.eraser_button,
             self.markup_color_button, self.signature_button, self.stamp_button,
-            self.redact_button,
+            self.redact_button, self.scan_text_button,
             self.add_bookmark_button, self.remove_bookmark_button,
             self._act_save, self._act_save_as, self._act_print, self._act_preview,
             self._act_props,
@@ -1239,10 +1311,14 @@ class PDFReaderUI(QMainWindow):
             self._act_add_page, self._act_remove_page,
             self._act_move_up, self._act_move_down, self._act_bookmark,
             self._act_extract_pages, self._act_apply_redact,
+            self._act_edit_scan_text,
             self._act_password,
             self._act_ocr, self._act_export_docx, self._act_export_xlsx,
             # legacy compat
-            self._act_save_copy, self._act_reset_form,
+            self._act_save_copy, self._act_reset_form, self._act_reset_all_forms,
+            self._act_flatten_form, self._act_form_designer,
+            self._act_detect_form_fields, self._act_form_properties,
+            self._act_delete_form_field,
             self._act_undo, self._act_redo,
             self._act_copy_text, self._act_select_all,
             self._act_find, self._act_find_next, self._act_find_prev,

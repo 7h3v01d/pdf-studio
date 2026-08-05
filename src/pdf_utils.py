@@ -167,12 +167,9 @@ def prev_search_result(pdf_reader):
 
 def _rebuild_after_page_op(pdf_reader, status_msg):
     pdf_reader.load_pages()
+    pdf_reader._reload_form_cache()
     pdf_reader.update_view()
-    pdf_reader.pages = [
-        pdf_reader.pdf_document.load_page(i)
-        for i in range(pdf_reader.total_pages)]
-    pdf_reader.form_fields = {
-        i: list(p.widgets()) for i, p in enumerate(pdf_reader.pages)}
+    pdf_reader.refresh_forms_panel()
     pdf_reader.load_thumbnails()
     pdf_reader.load_toc()
     pdf_reader.page_label.setText(f" / {pdf_reader.total_pages}")

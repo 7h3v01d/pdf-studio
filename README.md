@@ -1,11 +1,15 @@
 # PDF Studio
 
+> **Phase 4.1 reliability fix:** scanned-text selection now retains the mouse
+> through release, displays an immediate OCR progress window, performs one
+> Tesseract recognition pass instead of two, and always opens the manual editor
+> if OCR ends without a usable result.
+
+
 A free, full-featured PDF reader and editor built with Python and PyQt6.
 
 Created by **Leon Priest** ([github.com/7h3v01d](https://github.com/7h3v01d)) and released
 under the **Apache License 2.0** — free to use, modify, and share.
-
-<img width="1920" height="1080" alt="screenshot" src="https://github.com/user-attachments/assets/b7f59704-927f-45a1-963a-6b851f1633a8" />
 
 ---
 
@@ -13,7 +17,7 @@ under the **Apache License 2.0** — free to use, modify, and share.
 
 ### Viewing & Navigation
 - **Open & View** — single-page and continuous scroll view modes, fit-width/fit-page zoom, rotate, dark mode, full-screen
-- **Navigation Panel** — collapsible, resizable sidebar: Table of Contents, Bookmarks, Annotations, Page Thumbnails
+- **Navigation Panel** — collapsible, resizable sidebar: Table of Contents, Bookmarks, Annotations, Forms, Page Thumbnails
 - **Search** — full-text search with next/previous result navigation
 - **Recent Files** — quick-open split-button for the last 10 opened files
 - **Metadata Viewer** — inspect document properties
@@ -22,15 +26,116 @@ under the **Apache License 2.0** — free to use, modify, and share.
 - **Annotations** — sticky notes, highlights, underlines, strikethrough, freehand drawing, eraser
 - **Signatures & Stamps** — add a signature by **drawing** it or **importing a PNG/JPG image** (with automatic white-background removal for scans); **drag-and-drop** an image straight onto the page; insert text stamps. (Image stamp, not a cryptographic/digital signature.)
 - **Redactions** — mark and permanently apply redactions
+- **Scanned Text Replacement** — select text in a scan, OCR it, edit the result, preview the replacement, then apply a reversible overlay or a permanent pixel-removing replacement
 - **Annotations Panel** — sidebar listing all annotations with jump-to and delete actions
 
 ### Editing & Page Management
-- **Form Filling** — text fields, checkboxes, dropdowns directly in the viewer
+- **Existing PDF Form Filling** — detects AcroForm fields and exposes text, multiline, checkbox, radio, dropdown, and list controls directly over the page
+- **Forms Panel** — lists every field, identifies required/read-only fields, jumps to a selected field, toggles field highlighting, and resets one page or the whole form
+- **Form Designer** — creates genuine text, checkbox, dropdown, date, linked Yes/No radio, signature, and initials fields on ordinary or scanned PDFs; select, move, resize, rename, configure, and delete fields before saving
+- **OCR-Assisted Form Detection** — analyses the current page for labels, answer lines, outlined boxes, and checkbox squares; previews confidence-ranked suggestions and creates only the fields the user explicitly approves
+- **Safe Form Flattening** — creates a separate, verified non-editable copy while preserving the editable original
 - **Page Management** — add blank pages, remove pages, reorder via drag-and-drop thumbnails or move up/down
 - **Full Undo/Redo** — annotations, markup, page insert/delete/move (including drag-to-reorder)
 - **Merge & Split** — merge multiple PDFs or split one into separate files
 - **Extract Pages** — extract a range or selection to a new PDF
 - **Password Protection** — open password-protected PDFs; encrypt saved PDFs with AES-256, set open/permissions passwords and granular permission flags
+
+### Existing PDF forms
+
+When a PDF already contains interactive AcroForm fields, PDF Studio detects them
+automatically. The **Forms** section in the left navigation panel lists every
+field and lets you double-click one to jump directly to it. Fillable fields are
+highlighted in blue by default; read-only fields are shown distinctly.
+
+Supported controls include single-line and multiline text, checkboxes, radio
+buttons, dropdowns, and list boxes. Signature fields are detected, but this
+release does not perform cryptographic PDF signing. Embedded PDF JavaScript and
+push-button actions are deliberately not executed.
+
+Use **Tools → Reset Form Fields on Page** or **Reset All Form Fields** when
+needed. **Flatten Form to Copy…** creates a separate PDF where the visible
+answers are permanently baked into the pages and verifies that no interactive
+widgets remain. It refuses to overwrite the editable original.
+
+Form changes mark the document as unsaved. Closing PDF Studio or opening another
+file prompts to save, discard, or cancel, and `Ctrl+S` persists field values
+using a legal incremental PDF save.
+
+### Creating fillable fields
+
+Open the **Forms** section and enable **Design mode**. Choose **Text Field**,
+**Checkbox**, **Dropdown**, **Date**, **Yes / No**, **Signature**, or **Initials**,
+then click or drag on any ordinary or scanned page. Choose **Select** to
+click an existing field, drag inside it to move it, or drag the lower-right
+handle to resize it. **Properties…** changes the field name, tooltip, required
+state, read-only state, multiline behaviour for ordinary text fields, and the
+choice list or custom-entry setting for dropdowns.
+
+Designer changes are real AcroForm widgets, not decorative rectangles. Press
+`Ctrl+S`, reopen the PDF, and switch Design mode off to fill the fields normally.
+The **Yes / No** tool creates a linked, mutually exclusive radio pair. Signature
+and initials controls are genuine unsigned PDF signature placeholders; PDF
+Studio preserves them but does not yet perform certificate-backed signing.
+
+### OCR-assisted form detection
+
+For scanned or complex forms, open the **Forms** section and choose **Detect
+Current Page...**. PDF Studio uses an existing text layer when one is available;
+otherwise it runs Tesseract OCR on that page. It combines recognised labels with
+vector or scanned lines and boxes, then draws temporary coloured suggestion
+outlines over the page.
+
+Choose **More suggestions**, **Balanced**, or **High confidence**, then run the
+detector. A resizable **Review Smart Form Suggestions** window opens automatically.
+Its table shows whether each proposal will be used, the field type, detected
+label, confidence, and the reason it was suggested. Untick anything incorrect
+and press **Create Checked**. You can also check all, uncheck all, or keep only
+suggestions at 80% confidence or above.
+
+No PDF field is created until that confirmation. The Forms sidebar now keeps only
+a compact detection summary plus **Review Suggestions...** and **Clear** buttons,
+and the complete Forms panel scrolls instead of crushing controls when its
+navigation section is short. Existing fields are excluded from overlapping
+suggestions, and inferred answer areas receive lower confidence than fields
+supported by visible geometry.
+
+This first detector intentionally favours dependable text, date, checkbox,
+signature, and initials fields. It does not claim perfect automatic layout
+understanding; ambiguous fields should still be placed or corrected with Form
+Designer.
+
+
+### Editing text in a scanned page
+
+A scanned PDF is a picture, so its letters are not native editable text. PDF
+Studio now provides a controlled **Edit Text** workflow that replaces a selected
+region without pretending the scan is a Word document:
+
+1. Click **Edit Text** in the **EDIT SCAN** toolbar group, or choose
+   **Tools → Edit Scanned Text...**.
+2. Drag a rectangle around the word or line you want to change and release the
+   mouse button. The page explicitly retains the drag through release.
+3. A progress window appears immediately. PDF Studio uses an existing text layer
+   when available; otherwise it OCRs only the selected region with one Tesseract
+   recognition pass. This first release uses Tesseract's
+   English model for selected-region OCR; manual replacement remains available
+   for other languages.
+4. Correct the recognised text, choose alignment, font size, text colour, and the
+   sampled background colour, then review the live preview.
+5. Apply either:
+   - **Reversible white-out overlay** — recommended. Creates one opaque FreeText
+     annotation, preserves the scan underneath, supports Ctrl+Z, and can be
+     removed from the Annotations panel.
+   - **Permanent erase + replacement** — removes text, line art, and image pixels
+     inside the rectangle before inserting the new text. This cannot be undone in
+     the current editing session.
+
+Permanent replacements and applied redactions require **Save As**. PDF Studio
+forces a clean, compact rewrite under a new filename so removed page content is
+not left behind in an incremental PDF revision and the original remains
+preserved. OCR failure does not block the editor; replacement text can still be
+entered manually.
 
 ### How to confirm the OCR text layer
 
@@ -74,6 +179,16 @@ pdf_utils.py             # Utilities (search, page ops, annotation I/O, undo pus
 pdf_scroll_area.py       # Custom QScrollArea (wheel zoom + page-flip)
 pdf_page_widget.py       # Custom QLabel page rendering with form-field support
 annotations_panel.py     # Sidebar panel listing all annotations
+forms_panel.py           # AcroForm inventory, filling, and Form Designer controls
+form_designer_core.py    # Tested create/move/resize/delete/property operations
+form_detection_core.py   # OCR/layout analysis and approved-suggestion creation
+form_detection_worker.py # Background current-page OCR and geometry detection
+form_detection_review_model.py # Testable suggestion review/selection model
+form_detection_review_dialog.py # Resizable approval table for detected fields
+scan_text_edit_core.py  # Tested reversible/permanent scanned-text operations
+scan_text_edit_dialog.py # OCR result editor and live replacement preview
+scan_text_edit_worker.py # Background selected-region Tesseract worker
+form_field_dialog.py     # Field-name, tooltip, flags, and multiline properties
 password_dialog.py       # Password prompt and encryption settings dialogs
 signature_dialog.py      # Draw-your-own signature dialog
 merge_split_dialog.py    # Merge / split PDF dialog
@@ -170,6 +285,26 @@ pip install pywin32          # enables the Microsoft Word/Excel conversion path
 python pdf_reader.py
 ```
 
+## Testing
+
+Install the development requirements once, then run the complete structural form suite:
+
+```bat
+.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+run_tests.bat
+```
+
+Or run pytest directly:
+
+```bat
+.venv\Scripts\python.exe -m pytest tests -v
+```
+
+The suite verifies existing-form filling and flattening, Form Designer and Smart
+Detection persistence, plus scanned-text overlays, overlay removal, permanent
+text, vector-line, and raster replacement, background sampling, metadata, and
+text fitting.
+
 ## Building a Windows .exe
 
 **Build in a clean, isolated venv** — this is the #1 thing that prevents build
@@ -265,9 +400,65 @@ The built executable also supports the flags directly:
 
 ## Changelog
 
+### v3.2-alpha2 — scanned-text editor handoff reliability
+
+- Explicitly retain the page mouse grab until a selected region is released.
+- Show an immediate **Preparing Scanned-Text Editor** progress window.
+- Reconstruct OCR text and confidence from one Tesseract data pass instead of launching recognition twice.
+- Keep the OCR worker alive until its thread has actually finished.
+- Open the manual replacement editor if OCR finishes without returning a result.
+- Added OCR-data reconstruction and malformed-confidence tests.
+
+### v3.2-alpha1 — OCR-assisted scanned-text replacement
+
+- Added an **Edit Text** region tool for scanned pages.
+- Uses an existing text layer when available and Tesseract OCR otherwise.
+- Added a resizable editor with recognised text, replacement text, confidence, live preview, auto-fit font sizing, alignment, and colour controls.
+- Added reversible opaque FreeText replacements with Ctrl+Z/Redo and Annotations-panel deletion.
+- Added permanent erase-and-replace mode that removes vector text, line art, and raster pixels under the selected rectangle.
+- Permanent removals now force Save As and a clean full PDF rewrite, preserving the source and avoiding incremental-revision residue.
+- Added manual-entry fallback when OCR is unavailable or cannot read the region.
+- Added vector-text, vector-line, raster-pixel, metadata, background-sampling,
+  validation, and overlay-removal tests.
+
+### v3.1-alpha2 — Smart Detection review UI
+
+- Moved suggestion approval from the cramped sidebar into a resizable review dialog.
+- Added full-width confidence, label, type, rationale, bulk-check, and create controls.
+- Made the Forms section internally scrollable at constrained sidebar heights.
+
 ### v3.0 — Print preview
 - **File → Print Preview…** (`Ctrl+Shift+P`) shows what will print before sending it to the printer
 - Print and preview share one rendering path, so the preview always matches the printed output
+
+### v3.1-alpha1 — OCR-assisted form detection
+
+- Added current-page detection for labels, answer lines, outlined boxes, and checkbox squares.
+- Uses native PDF text when available and Tesseract OCR for image-only pages.
+- Added confidence filtering, page overlays, checkable suggestions, and explicit approval before field creation.
+- Existing fields suppress overlapping suggestions; inferred geometry is deliberately lower confidence.
+- Added raster/vector detection and approved-field persistence tests.
+
+### v3.0-alpha3 — Rich form controls
+
+- Added dropdown fields with editable choice lists.
+- Added DD/MM/YYYY date fields with an in-app calendar control.
+- Added linked Yes / No radio groups.
+- Added genuine unsigned PDF signature and initials fields.
+- Extended field properties and structural persistence tests.
+
+### v3.0-alpha2 — Form Designer foundation
+- Design/fill mode switch in the Forms sidebar and Tools menu
+- Create genuine AcroForm text fields and checkboxes on existing or scanned pages
+- Select, move, lower-right resize, rename, configure, and delete fields
+- Required, read-only, tooltip, and multiline field properties
+- Boundary-safe geometry, unique automatic names, unsaved-change protection, and reopen persistence tests
+
+### v3.0-alpha1 — Existing forms foundation
+- Forms sidebar with field inventory, jump-to-field, highlighting, page/all reset
+- Reliable text, multiline, checkbox, radio, dropdown, and single-choice list filling
+- Unsaved-form protection and corrected incremental save persistence
+- Safe flatten-to-copy with structural and visual verification
 
 ### v2.9 — Printing fixed
 - **Fixed: printing produced a single blank page.** The code called `QPrinter.pageRect(QPrinter.Unit.Pixel)`, but PyQt6 has no `Unit.Pixel` (it is `DevicePixel`). The resulting AttributeError was swallowed by a bare `except`, after the print job had already been opened — so the printer received an empty job. Page geometry now comes from the painter's viewport.

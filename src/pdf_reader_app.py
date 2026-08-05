@@ -6,22 +6,71 @@ Core application logic.  Inherits all UI from PDFReaderUI.
 import sys
 import os
 import json
+from dataclasses import asdict
 import fitz  # PyMuPDF
 from PyQt6.QtWidgets import (
     QInputDialog, QMessageBox, QLabel, QMenu, QFileDialog,
     QApplication, QListWidgetItem, QLineEdit, QCheckBox, QComboBox,
     QRadioButton, QTextEdit, QColorDialog, QDialog, QVBoxLayout,
-    QHBoxLayout, QPushButton, QSizePolicy)
+    QHBoxLayout, QPushButton, QSizePolicy, QListWidget, QButtonGroup,
+    QAbstractItemView, QDateEdit, QProgressDialog)
 from PyQt6.QtGui import (
     QPixmap, QImage, QPainter, QPen, QColor, QAction, QIcon,
     QCursor, QFont)
-from PyQt6.QtCore import Qt, QRectF, QPoint, QSize, QSettings
+from PyQt6.QtCore import Qt, QRectF, QPoint, QSize, QSettings, QDate, QTimer
 from PyQt6.QtPrintSupport import QPrinter, QPrintDialog
 
 from pdf_reader_ui import PDFReaderUI
 from about_dialog import APP_NAME
 from password_dialog import PasswordPromptDialog, PasswordProtectDialog
 from undo_stack import UndoStack, Command
+from form_designer_core import (
+    DEFAULT_CHECKBOX_SIZE,
+    DEFAULT_DATE_SIZE,
+    DEFAULT_DROPDOWN_SIZE,
+    DEFAULT_INITIALS_SIZE,
+    DEFAULT_RADIO_GROUP_SIZE,
+    DEFAULT_SIGNATURE_SIZE,
+    DEFAULT_TEXT_SIZE,
+    KIND_DATE,
+    KIND_INITIALS,
+    MIN_CHECKBOX_SIZE,
+    MIN_CHOICE_SIZE,
+    MIN_SIGNATURE_SIZE,
+    MIN_TEXT_SIZE,
+    add_checkbox_field,
+    add_date_field,
+    add_dropdown_field,
+    add_radio_group,
+    add_signature_field,
+    add_text_field,
+    delete_widget as delete_form_widget_core,
+    move_or_resize_widget,
+    normalise_rect,
+    radio_option_label,
+    update_widget_properties,
+    unique_field_name,
+    widget_custom_kind,
+)
+from form_detection_core import (
+    create_fields_from_suggestions,
+    words_from_native,
+    vector_graphics_from_page,
+)
+from form_detection_worker import FormDetectionWorker
+from form_detection_review_dialog import FormDetectionReviewDialog
+from scan_text_edit_core import (
+    MODE_OVERLAY as SCAN_MODE_OVERLAY,
+    MODE_REDACT as SCAN_MODE_REDACT,
+    ScanTextReplacement,
+    apply_scan_text_replacement,
+    remove_overlay_replacement,
+    sample_background_rgb,
+)
+from scan_text_edit_dialog import ScanTextEditDialog
+from scan_text_edit_worker import ScanTextOCRWorker
+from tesseract_setup import configure_tesseract
+from form_field_dialog import FormFieldPropertiesDialog
 from pdf_utils import (
     load_annotations, save_annotations, load_bookmarks, save_bookmarks,
     search_text, next_search_result, prev_search_result,
@@ -39,6 +88,21 @@ TOOL_FREEHAND      = "freehand"
 TOOL_ERASER        = "eraser"
 TOOL_SIGNATURE     = "signature"
 TOOL_REDACT        = "redact"
+TOOL_SCAN_TEXT      = "scan_text"
+
+FORM_TOOL_SELECT    = "select"
+FORM_TOOL_TEXT      = "text"
+FORM_TOOL_CHECKBOX  = "checkbox"
+FORM_TOOL_DROPDOWN  = "dropdown"
+FORM_TOOL_DATE      = "date"
+FORM_TOOL_RADIO     = "radio"
+FORM_TOOL_SIGNATURE = "signature"
+FORM_TOOL_INITIALS  = "initials"
+
+FORM_CREATE_TOOLS = {
+    FORM_TOOL_TEXT, FORM_TOOL_CHECKBOX, FORM_TOOL_DROPDOWN, FORM_TOOL_DATE,
+    FORM_TOOL_RADIO, FORM_TOOL_SIGNATURE, FORM_TOOL_INITIALS,
+}
 
 # Default on-page signature width in PDF points (aspect ratio preserved).
 DEFAULT_SIG_WIDTH_PT = 200
@@ -96,7 +160,33 @@ class PDFReader(PDFReaderUI):
 
         # ── Form field state ─────────────────────────────────────────────
         self.form_fields  = {}   # {page: [fitz.Widget]}
-        self.field_widgets = {}  # {page: [Qt widgets]}
+        # {page: [(Qt widget, fitz.Widget)]}; pairing avoids type gaps
+        self.field_widgets = {}
+        self._radio_groups = {}  # {(page, field_name): QButtonGroup}
+        self._form_highlighting = True
+        self._form_design_mode = False
+        self._form_design_tool = FORM_TOOL_SELECT
+        self._selected_form_ref = None  # (page_number, widget xref)
+        self._form_drag_action = None   # create / move / resize
+        self._form_drag_page = -1
+        self._form_drag_start_pdf = None
+        self._form_drag_original_rect = None
+        self._form_preview_rect = None
+        self._form_suggestions = []
+        self._selected_form_suggestion_id = None
+        self._form_detection_worker = None
+        self._form_detection_context = None
+        self._form_detection_statistics = {}
+        self._form_detection_dialog = None
+
+        # OCR-assisted scanned-text replacement. The context owns a copied
+        # region image so it remains valid while the worker runs.
+        self._scan_text_worker = None
+        self._scan_text_context = None
+        self._scan_text_progress = None
+        self._scan_text_mouse_grab_widget = None
+        self._requires_full_rewrite = False
+
         self.pages        = []   # cached fitz page objects
 
         # ── Text selection state ─────────────────────────────────────────
@@ -259,9 +349,23 @@ class PDFReader(PDFReaderUI):
         QApplication.restoreOverrideCursor()
 
         # Open the converted PDF, but present it under the original filename.
-        self._open_pdf_path(pdf_path, display_path=src)
+        self._open_pdf_path(pdf_path, display_path=src, skip_unsaved_prompt=True)
 
-    def _open_pdf_path(self, file_name, display_path=None):
+    def _open_pdf_path(self, file_name, display_path=None, skip_unsaved_prompt=False):
+        if (
+            self._scan_text_worker is not None
+            and self._scan_text_worker.isRunning()
+        ):
+            QMessageBox.information(
+                self,
+                "Scanned-Text OCR Running",
+                "Wait for the selected-region OCR to finish before opening "
+                "another document.",
+            )
+            return
+        if (not skip_unsaved_prompt and self.pdf_document
+                and not self._confirm_save_changes("open another document")):
+            return
         if not os.path.exists(file_name):
             self.status_bar.showMessage(f"File not found: {file_name}")
             return
@@ -315,8 +419,14 @@ class PDFReader(PDFReaderUI):
                         "Incorrect password. The file could not be opened.")
                     doc.close()
                     return
+            old_document = self.pdf_document
             self.pdf_document   = doc
             self.pdf_file_path  = file_name
+            if old_document is not None and old_document is not doc:
+                try:
+                    old_document.close()
+                except Exception:
+                    pass
             self.total_pages    = self.pdf_document.page_count
             self.current_page   = 0
             self.rotation       = 0
@@ -330,15 +440,17 @@ class PDFReader(PDFReaderUI):
             self.markup_strokes = self._load_markup_strokes(file_name)
             self._undo_stack.clear()
             self._form_dirty = False
+            self._form_design_mode = False
+            self._form_design_tool = FORM_TOOL_SELECT
+            self._selected_form_ref = None
+            self._clear_form_drag()
+            self.clear_form_suggestions(update_view=False)
+            self._scan_text_context = None
+            self._requires_full_rewrite = False
             self._update_undo_redo_labels()
             self.bookmarks   = load_bookmarks(file_name)
 
-            self.form_fields = {}
-            self.pages       = []
-            for pn in range(self.total_pages):
-                page = self.pdf_document.load_page(pn)
-                self.form_fields[pn] = list(page.widgets())
-                self.pages.append(page)
+            self._reload_form_cache()
 
             self.selection_start_point  = None
             self.selection_end_point    = None
@@ -352,6 +464,7 @@ class PDFReader(PDFReaderUI):
 
             self._enable_all_controls()
             self.refresh_annotations_panel()
+            self.refresh_forms_panel()
             self.update_ui_on_page_change()
             self.page_label.setText(f" / {self.total_pages}")
             shown = display_path or file_name
@@ -377,7 +490,7 @@ class PDFReader(PDFReaderUI):
             self.annotate_button, self.highlight_button, self.underline_button,
             self.strikethrough_button, self.freehand_button, self.eraser_button,
             self.signature_button, self.stamp_button, self.markup_color_button,
-            self.redact_button,
+            self.redact_button, self.scan_text_button,
             # sidebar
             self.add_bookmark_button, self.remove_bookmark_button,
             # menu actions
@@ -388,9 +501,13 @@ class PDFReader(PDFReaderUI):
             self._act_add_page, self._act_remove_page,
             self._act_move_up, self._act_move_down, self._act_bookmark,
             self._act_extract_pages, self._act_apply_redact,
+            self._act_edit_scan_text,
             self._act_password,
             self._act_ocr, self._act_export_docx, self._act_export_xlsx,
-            self._act_save_copy, self._act_reset_form,
+            self._act_save_copy, self._act_reset_form, self._act_reset_all_forms,
+            self._act_flatten_form, self._act_form_designer,
+            self._act_detect_form_fields, self._act_form_properties,
+            self._act_delete_form_field,
             self._act_undo, self._act_redo,
             self._act_copy_text, self._act_select_all,
             self._act_find, self._act_find_next, self._act_find_prev,
@@ -468,12 +585,14 @@ class PDFReader(PDFReaderUI):
                 page.apply_redactions()
             self.pending_redactions.clear()
             self.active_tool = TOOL_NONE
+            self._requires_full_rewrite = True
+            self._mark_modified()
             self._sync_tool_buttons()
             self._update_cursor()
             self.update_view()
             self.refresh_annotations_panel()
             self.status_bar.showMessage(
-                "Redactions applied. Save the document to make them permanent.")
+                "Redactions applied. Save As is required for a clean full rewrite.")
         except Exception as e:
             self.status_bar.showMessage(f"Redaction error: {e}")
 
@@ -489,86 +608,193 @@ class PDFReader(PDFReaderUI):
         if title.startswith("*"):
             self.setWindowTitle(title[1:])
 
+    def _has_unsaved_changes(self):
+        return bool(self.pdf_document and (
+            self._form_dirty or self.windowTitle().startswith("*")
+        ))
+
+    def _confirm_save_changes(self, action="continue"):
+        """Ask what to do with unsaved changes. Return True to proceed."""
+        if not self._has_unsaved_changes():
+            return True
+        reply = QMessageBox.warning(
+            self, "Unsaved Changes",
+            f"This document has unsaved changes. Save them before you {action}?",
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Save,
+        )
+        if reply == QMessageBox.StandardButton.Cancel:
+            return False
+        if reply == QMessageBox.StandardButton.Discard:
+            return True
+        return bool(self.save_pdf())
+
     def save_pdf(self):
-        """Incremental save back to the same file, or prompt if no path set."""
+        """Save the active PDF, forcing Save As after permanent removals."""
         if not self.pdf_document:
-            return
+            return False
+        if self._requires_full_rewrite:
+            QMessageBox.information(
+                self,
+                "Save As Required",
+                "This document contains permanently erased page content. "
+                "PDF Studio must write a new, compact PDF so removed pixels or "
+                "text are not retained in an incremental revision.\n\n"
+                "Choose a new filename. The original file will be preserved.",
+            )
+            return self.save_pdf_as()
         if self.pdf_file_path:
-            self._do_save(self.pdf_file_path)
-        else:
-            self.save_pdf_as()
+            return self._do_save(self.pdf_file_path)
+        return self.save_pdf_as()
 
     def save_pdf_as(self):
+        """Save to a new PDF, reopen that copy, and continue editing it."""
         if not self.pdf_document:
-            return
+            return False
+        default_path = self.pdf_file_path or "document.pdf"
+        if self._requires_full_rewrite and self.pdf_file_path:
+            base, ext = os.path.splitext(self.pdf_file_path)
+            default_path = base + "_edited" + (ext or ".pdf")
         file_name, _ = QFileDialog.getSaveFileName(
-            self, "Save PDF As", "", "PDF Files (*.pdf)")
-        if file_name:
-            self._do_save(file_name)
-            self.pdf_file_path = file_name
-            self.setWindowTitle(f"{APP_NAME}  –  {os.path.basename(file_name)}")
+            self, "Save PDF As", default_path, "PDF Files (*.pdf)")
+        if not file_name:
+            return False
+        if not file_name.lower().endswith(".pdf"):
+            file_name += ".pdf"
+        if (
+            self._requires_full_rewrite
+            and self.pdf_file_path
+            and os.path.abspath(file_name) == os.path.abspath(self.pdf_file_path)
+        ):
+            QMessageBox.warning(
+                self,
+                "Choose a New Filename",
+                "Permanent content removal cannot be saved incrementally over "
+                "the open source PDF. Choose a different filename.",
+            )
+            return False
 
-    def _do_save(self, path):
+        old_page = self.current_page
+        if not self._do_save(file_name, sidecar_path=file_name):
+            return False
+
+        # Reopen the new file so later Ctrl+S correctly saves incrementally to it.
+        self._open_pdf_path(file_name, skip_unsaved_prompt=True)
+        if self.pdf_document and self.total_pages:
+            self.current_page = min(old_page, self.total_pages - 1)
+            self.update_ui_on_page_change()
+        return True
+
+    def _prepare_document_for_save(self):
+        """Flush forms and convert pending app-level markup into PDF objects."""
+        self._autosave_form_data()
+
+        # Bake sticky-note annotations.
+        for pn, items in self.annotations.items():
+            page = self.pdf_document.load_page(pn)
+            existing_positions = set()
+            for annot in page.annots() or []:
+                if annot.type[0] == 8:
+                    pos = annot.rect.top_left
+                    existing_positions.add((round(pos.x), round(pos.y)))
+            for x, y, text in items:
+                if (round(x), round(y)) not in existing_positions:
+                    annot = page.add_text_annot(fitz.Point(x, y), text)
+                    annot.set_colors(stroke=(1, 0.6, 0))
+                    annot.update()
+
+        # Bake markup strokes (highlight / underline / strikethrough / ink).
+        for pn, strokes in self.markup_strokes.items():
+            page = self.pdf_document.load_page(pn)
+            for stroke in strokes:
+                if stroke.get("baked"):
+                    continue
+                stype = stroke["type"]
+                rects = [fitz.Rect(r) for r in stroke.get("rects", [])]
+                color = stroke.get("color", [1, 1, 0])
+                if stype == "highlight" and rects:
+                    annot = page.add_highlight_annot(rects)
+                    annot.set_colors(stroke=color)
+                    annot.update()
+                elif stype == "underline" and rects:
+                    annot = page.add_underline_annot(rects)
+                    annot.set_colors(stroke=color)
+                    annot.update()
+                elif stype == "strikethrough" and rects:
+                    annot = page.add_strikeout_annot(rects)
+                    annot.set_colors(stroke=color)
+                    annot.update()
+                elif stype == "freehand":
+                    points = stroke.get("points", [])
+                    if len(points) >= 2:
+                        ink_list = [[fitz.Point(p[0], p[1]) for p in points]]
+                        annot = page.add_ink_annot(ink_list)
+                        annot.set_colors(stroke=color)
+                        annot.set_border(width=stroke.get("width", 2))
+                        annot.update()
+                elif stype == "signature":
+                    image_bytes = stroke.get("image_bytes")
+                    rect = fitz.Rect(stroke.get("rect", [0, 0, 100, 50]))
+                    if image_bytes:
+                        page.insert_image(rect, stream=image_bytes)
+                stroke["baked"] = True
+
+    def _do_save(self, path, sidecar_path=None):
+        """Save safely, including form values, and return success."""
+        if not self.pdf_document:
+            return False
+        path = os.path.abspath(path)
+        sidecar_path = os.path.abspath(sidecar_path or path)
         try:
-            # Bake annotations
-            for pn, items in self.annotations.items():
-                page = self.pdf_document.load_page(pn)
-                existing_positions = set()
-                for annot in page.annots():
-                    if annot.type[0] == 8:
-                        pos = annot.rect.top_left
-                        existing_positions.add((round(pos.x), round(pos.y)))
-                for x, y, text in items:
-                    if (round(x), round(y)) not in existing_positions:
-                        a = page.add_text_annot(fitz.Point(x, y), text)
-                        a.set_colors(stroke=(1, 0.6, 0))
-                        a.update()
+            self._prepare_document_for_save()
 
-            # Bake markup strokes (highlight / underline / strikethrough)
-            for pn, strokes in self.markup_strokes.items():
-                page = self.pdf_document.load_page(pn)
-                for stroke in strokes:
-                    if stroke.get("baked"):
-                        continue
-                    stype  = stroke["type"]
-                    rects  = [fitz.Rect(r) for r in stroke.get("rects", [])]
-                    color  = stroke.get("color", [1, 1, 0])
-                    if stype == "highlight" and rects:
-                        a = page.add_highlight_annot(rects)
-                        a.set_colors(stroke=color)
-                        a.update()
-                    elif stype == "underline" and rects:
-                        a = page.add_underline_annot(rects)
-                        a.set_colors(stroke=color)
-                        a.update()
-                    elif stype == "strikethrough" and rects:
-                        a = page.add_strikeout_annot(rects)
-                        a.set_colors(stroke=color)
-                        a.update()
-                    elif stype == "freehand":
-                        points = stroke.get("points", [])
-                        if len(points) >= 2:
-                            ink_list = [[fitz.Point(p[0], p[1]) for p in points]]
-                            a = page.add_ink_annot(ink_list)
-                            a.set_colors(stroke=color)
-                            a.set_border(width=stroke.get("width", 2))
-                            a.update()
-                    elif stype == "signature":
-                        # Signature is baked as an image annotation
-                        img_bytes = stroke.get("image_bytes")
-                        rect      = fitz.Rect(stroke.get("rect", [0, 0, 100, 50]))
-                        if img_bytes:
-                            page.insert_image(rect, stream=img_bytes)
-                    stroke["baked"] = True
+            document_name = os.path.abspath(self.pdf_document.name) \
+                if getattr(self.pdf_document, "name", None) else ""
+            same_file = bool(document_name and document_name == path)
 
-            self.pdf_document.save(path, garbage=3, deflate=True)
-            save_annotations(self)
-            self._save_markup_strokes(path)
-            save_bookmarks(self)
+            requires_full_rewrite = bool(self._requires_full_rewrite)
+            if same_file:
+                if requires_full_rewrite:
+                    raise RuntimeError(
+                        "A clean full rewrite must be saved under a new filename."
+                    )
+                # Incremental save is the only legal direct save to an open PDF.
+                self.pdf_document.saveIncr()
+            else:
+                self.pdf_document.save(
+                    path,
+                    garbage=4 if requires_full_rewrite else 3,
+                    clean=requires_full_rewrite,
+                    deflate=True,
+                    encryption=fitz.PDF_ENCRYPT_KEEP,
+                )
+
+            # Sidecar files must follow Save As rather than remaining beside the old PDF.
+            old_path = self.pdf_file_path
+            self.pdf_file_path = sidecar_path
+            try:
+                save_annotations(self)
+                self._save_markup_strokes(sidecar_path)
+                save_bookmarks(self)
+            finally:
+                self.pdf_file_path = old_path
+
+            self._form_dirty = False
+            if not same_file:
+                self._requires_full_rewrite = False
             self._clear_modified()
+            self.refresh_forms_panel()
             self.status_bar.showMessage(f"Saved: {path}")
-        except Exception as e:
-            self.status_bar.showMessage(f"Save error: {e}")
+            return True
+        except Exception as exc:
+            QMessageBox.critical(
+                self, "Save Error",
+                f"The PDF could not be saved. Your open document remains available.\n\n"
+                f"{type(exc).__name__}: {exc}")
+            self.status_bar.showMessage(f"Save error: {exc}")
+            return False
 
     # =========================================================================
     # Markup stroke persistence (sidebar JSON file, separate from annotations)
@@ -603,6 +829,11 @@ class PDFReader(PDFReaderUI):
 
     def set_markup_tool(self, tool: str):
         """Toggle a markup tool on/off; deactivates any other tool."""
+        if self._form_design_mode:
+            self.set_form_design_mode(False)
+        if tool == TOOL_SCAN_TEXT and self._scan_text_worker is not None:
+            self.status_bar.showMessage("Scanned-text OCR is already running.")
+            return
         if self.active_tool == tool:
             self.active_tool = TOOL_NONE
         else:
@@ -610,8 +841,13 @@ class PDFReader(PDFReaderUI):
             self.annotation_mode = False
         self._sync_tool_buttons()
         self._update_cursor()
+        if self.active_tool == TOOL_SCAN_TEXT:
+            self.status_bar.showMessage(
+                "Drag a rectangle around scanned text to OCR and replace it."
+            )
 
     def clear_active_tool(self):
+        self._release_scan_text_mouse_grab()
         self.active_tool = TOOL_NONE
         self.annotation_mode = False
         self._clear_tool_buttons()
@@ -621,8 +857,10 @@ class PDFReader(PDFReaderUI):
         for btn in [self.annotate_button, self.highlight_button,
                     self.underline_button, self.strikethrough_button,
                     self.freehand_button, self.eraser_button,
-                    self.signature_button]:
+                    self.signature_button, self.redact_button,
+                    self.scan_text_button]:
             btn.setChecked(False)
+        self._act_edit_scan_text.setChecked(False)
 
     def _sync_tool_buttons(self):
         mapping = {
@@ -634,9 +872,13 @@ class PDFReader(PDFReaderUI):
             TOOL_ERASER:        self.eraser_button,
             TOOL_SIGNATURE:     self.signature_button,
             TOOL_REDACT:        self.redact_button,
+            TOOL_SCAN_TEXT:      self.scan_text_button,
         }
         for tool, btn in mapping.items():
             btn.setChecked(self.active_tool == tool)
+        self._act_edit_scan_text.setChecked(
+            self.active_tool == TOOL_SCAN_TEXT
+        )
 
     def _update_cursor(self):
         cursors = {
@@ -648,8 +890,16 @@ class PDFReader(PDFReaderUI):
             TOOL_ANNOTATE:      Qt.CursorShape.CrossCursor,
             TOOL_SIGNATURE:     Qt.CursorShape.CrossCursor,
             TOOL_REDACT:        Qt.CursorShape.CrossCursor,
+            TOOL_SCAN_TEXT:      Qt.CursorShape.CrossCursor,
         }
-        shape = cursors.get(self.active_tool, Qt.CursorShape.ArrowCursor)
+        if self._form_design_mode:
+            shape = (
+                Qt.CursorShape.CrossCursor
+                if self._form_design_tool in (FORM_TOOL_TEXT, FORM_TOOL_CHECKBOX)
+                else Qt.CursorShape.SizeAllCursor
+            )
+        else:
+            shape = cursors.get(self.active_tool, Qt.CursorShape.ArrowCursor)
         cursor = QCursor(shape)
         for w in self.page_widgets:
             w.setCursor(cursor)
@@ -1049,6 +1299,11 @@ class PDFReader(PDFReaderUI):
                                 rect.y0 * self.zoom_level,
                                 (rect.x1 - rect.x0) * self.zoom_level,
                                 (rect.y1 - rect.y0) * self.zoom_level))
+
+                if self._form_suggestions:
+                    self._paint_form_suggestion_overlay(painter, page_num)
+                if self._form_design_mode:
+                    self._paint_form_designer_overlay(painter, page_num)
             finally:
                 painter.end()
 
@@ -1095,140 +1350,1497 @@ class PDFReader(PDFReaderUI):
         self.update_status_bar()
 
     # =========================================================================
-    # Form fields
+    # Form Designer
     # =========================================================================
+
+    def set_form_design_mode(self, enabled):
+        """Switch between ordinary form filling and structural field editing."""
+        enabled = bool(enabled and self.pdf_document)
+        if enabled:
+            self._flush_form_controls()
+        self._form_design_mode = enabled
+        self._clear_form_drag()
+        self._radio_groups = {}
+        for pairs in self.field_widgets.values():
+            for control, _field in pairs:
+                control.hide()
+                control.deleteLater()
+        self.field_widgets = {}
+        if enabled:
+            self.active_tool = TOOL_NONE
+            self.annotation_mode = False
+            self._clear_tool_buttons()
+            self.selection_start_point = None
+            self.selection_end_point = None
+            self.current_selection_page = -1
+            self.status_bar.showMessage(
+                "Form Designer enabled. Choose a field tool or select an existing field."
+            )
+        else:
+            self._selected_form_ref = None
+            self.status_bar.showMessage(
+                "Form Designer closed. Interactive fields are ready to fill."
+            )
+        self._update_cursor()
+        self.refresh_forms_panel()
+        self.update_view()
+
+    # =========================================================================
+    # OCR-assisted form detection
+    # =========================================================================
+
+    def detect_form_fields_current_page(self, minimum_confidence=0.65):
+        """Analyse the current page and present non-destructive suggestions."""
+        if not self.pdf_document:
+            return
+        if self._form_detection_worker is not None:
+            self.status_bar.showMessage("Form detection is already running.")
+            return
+
+        page_number = int(self.current_page)
+        page = self.pdf_document.load_page(page_number)
+        native_words = words_from_native(page)
+        tesseract_status = configure_tesseract()
+        if len(native_words) < 3 and (
+            not tesseract_status.available or tesseract_status.executable is None
+        ):
+            QMessageBox.warning(
+                self,
+                "Form Detection Needs OCR",
+                "This page has no usable text layer, so PDF Studio needs "
+                "Tesseract OCR to recognise its labels.\n\n"
+                + tesseract_status.detail,
+            )
+            return
+
+        try:
+            matrix = fitz.Matrix(180 / 72, 180 / 72)
+            pixmap = page.get_pixmap(
+                matrix=matrix, colorspace=fitz.csRGB, alpha=False
+            )
+            vector_graphics = vector_graphics_from_page(page)
+            existing_rects = [
+                [field.rect.x0, field.rect.y0, field.rect.x1, field.rect.y1]
+                for field in self.form_fields.get(page_number, [])
+            ]
+            worker = FormDetectionWorker(
+                page_number=page_number,
+                page_rect=(page.rect.x0, page.rect.y0, page.rect.x1, page.rect.y1),
+                image_size=(pixmap.width, pixmap.height),
+                image_samples=bytes(pixmap.samples),
+                native_words=[asdict(word) for word in native_words],
+                vector_graphics=[asdict(item) for item in vector_graphics],
+                existing_field_rects=existing_rects,
+                tesseract_exe=(
+                    str(tesseract_status.executable)
+                    if tesseract_status.available and tesseract_status.executable
+                    else ""
+                ),
+                minimum_confidence=float(minimum_confidence),
+            )
+        except Exception as exc:
+            QMessageBox.warning(
+                self, "Form Detection",
+                f"The page could not be prepared for detection.\n\n"
+                f"{type(exc).__name__}: {exc}",
+            )
+            return
+
+        self.clear_form_suggestions(update_view=False)
+        self._form_detection_worker = worker
+        self._form_detection_context = (
+            os.path.abspath(self.pdf_file_path or ""), page_number
+        )
+        worker.detection_complete.connect(self._form_detection_finished)
+        worker.error.connect(self._form_detection_failed)
+        worker.finished.connect(worker.deleteLater)
+        self.forms_panel.set_detection_running(True)
+        self.status_bar.showMessage(
+            f"Analysing page {page_number + 1} for possible form fields…"
+        )
+        worker.start()
+
+    def _form_detection_finished(self, suggestions, statistics):
+        worker = self._form_detection_worker
+        context = self._form_detection_context
+        self._form_detection_worker = None
+        self._form_detection_context = None
+        self.forms_panel.set_detection_running(False)
+        if context is None or not self.pdf_document:
+            return
+        expected_path, page_number = context
+        if expected_path != os.path.abspath(self.pdf_file_path or ""):
+            return
+
+        self._form_suggestions = list(suggestions or [])
+        self._form_detection_statistics = dict(statistics or {})
+        self._selected_form_suggestion_id = (
+            self._form_suggestions[0].get("suggestion_id")
+            if self._form_suggestions else None
+        )
+        source = statistics.get("text_source", "text")
+        count = len(self._form_suggestions)
+        status = (
+            f"Page {page_number + 1}: {count} suggestion"
+            f"{'s' if count != 1 else ''}; "
+            f"{statistics.get('words', 0)} {source} words analysed. "
+            "Review the checked items before creating fields."
+            if count else
+            f"Page {page_number + 1}: no reliable field suggestions found. "
+            "Try ‘More suggestions’ or place fields manually."
+        )
+        self.forms_panel.set_detection_suggestions(
+            self._form_suggestions, status_text=status
+        )
+        self.status_bar.showMessage(status)
+        self.update_view()
+        if self._form_suggestions:
+            self.show_form_detection_review()
+        if worker is not None:
+            worker = None
+
+    def _form_detection_failed(self, message):
+        self._form_detection_worker = None
+        self._form_detection_context = None
+        self._form_detection_statistics = {}
+        self.forms_panel.set_detection_running(False)
+        self.forms_panel.set_detection_suggestions(
+            [], status_text="Form detection could not complete."
+        )
+        QMessageBox.warning(self, "Form Detection", str(message))
+        self.status_bar.showMessage("Form detection failed.")
+
+    def clear_form_suggestions(self, update_view=True):
+        self._form_suggestions = []
+        self._selected_form_suggestion_id = None
+        self._form_detection_statistics = {}
+        if hasattr(self, "forms_panel"):
+            self.forms_panel.set_detection_suggestions(
+                [], status_text="No suggestions yet"
+            )
+        dialog = getattr(self, "_form_detection_dialog", None)
+        if dialog is not None and dialog.isVisible():
+            dialog.reject()
+        if update_view and self.pdf_document:
+            self.update_view()
+
+    def show_form_detection_review(self):
+        """Open the full review window for the current detector results."""
+        if not self._form_suggestions:
+            self.status_bar.showMessage(
+                "Run Smart Form Detection before opening the review window."
+            )
+            return
+        if self._form_detection_dialog is None:
+            dialog = FormDetectionReviewDialog(self)
+            dialog.suggestion_selected.connect(self.select_form_suggestion)
+            dialog.create_requested.connect(self.create_checked_form_suggestions)
+            dialog.clear_requested.connect(self.clear_form_suggestions)
+            self._form_detection_dialog = dialog
+        dialog = self._form_detection_dialog
+        page_number = int(self._form_suggestions[0].get("page", self.current_page))
+        dialog.set_suggestions(
+            self._form_suggestions,
+            page_number=page_number,
+            statistics=self._form_detection_statistics,
+        )
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
+    def select_form_suggestion(self, page_number, x, y, suggestion_id):
+        if not self.pdf_document:
+            return
+        self._selected_form_suggestion_id = str(suggestion_id or "")
+        self.current_page = max(0, min(int(page_number), self.total_pages - 1))
+        self.update_ui_on_page_change()
+        self.jump_to_form_field(int(page_number), float(x), float(y))
+        self.update_view()
+
+    def _paint_form_suggestion_overlay(self, painter, page_number):
+        matrix = fitz.Matrix(self.zoom_level, self.zoom_level).prerotate(self.rotation)
+        for suggestion in self._form_suggestions:
+            if int(suggestion.get("page", -1)) != int(page_number):
+                continue
+            rect = fitz.Rect(suggestion.get("rect", (0, 0, 0, 0))) * matrix
+            selected = (
+                str(suggestion.get("suggestion_id", ""))
+                == str(self._selected_form_suggestion_id or "")
+            )
+            colour = QColor(156, 39, 176, 235) if selected else QColor(220, 90, 25, 205)
+            painter.setPen(QPen(
+                colour, 2 if selected else 1,
+                Qt.PenStyle.SolidLine if selected else Qt.PenStyle.DashLine,
+            ))
+            painter.setBrush(QColor(
+                colour.red(), colour.green(), colour.blue(), 32
+            ))
+            painter.drawRect(QRectF(rect.x0, rect.y0, rect.width, rect.height))
+            confidence = int(round(float(suggestion.get("confidence", 0.0)) * 100))
+            painter.setPen(colour)
+            painter.setFont(QFont("Arial", 8, QFont.Weight.Bold))
+            painter.drawText(
+                QRectF(rect.x0 + 2, max(0.0, rect.y0 - 15), 150, 14),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                f"{suggestion.get('kind', 'field')} {confidence}%",
+            )
+
+    def create_checked_form_suggestions(self, suggestions):
+        if not self.pdf_document:
+            return
+        records = [record for record in (suggestions or []) if record]
+        if not records:
+            self.status_bar.showMessage("Check at least one suggestion first.")
+            return
+        reply = QMessageBox.question(
+            self,
+            "Create Suggested Fields",
+            f"Create {len(records)} reviewed form field"
+            f"{'s' if len(records) != 1 else ''}?\n\n"
+            "The PDF will be marked as modified, but the original file is not "
+            "changed until you save.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        created_refs = []
+        failed = []
+        accepted_ids = set()
+        for record in records:
+            created_for_record, failed_for_record = create_fields_from_suggestions(
+                self.pdf_document, [record]
+            )
+            if created_for_record:
+                created_refs.extend(created_for_record)
+                accepted_ids.add(str(record.get("suggestion_id", "")))
+            failed.extend(failed_for_record)
+        if created_refs:
+            self._form_dirty = True
+            self._mark_modified()
+            self._reload_form_cache()
+            self._form_suggestions = [
+                item for item in self._form_suggestions
+                if str(item.get("suggestion_id", "")) not in accepted_ids
+            ]
+            self._selected_form_suggestion_id = (
+                self._form_suggestions[0].get("suggestion_id")
+                if self._form_suggestions else None
+            )
+            self.refresh_forms_panel()
+            self.forms_panel.set_detection_suggestions(self._form_suggestions)
+            self.update_view()
+            created = len(created_refs)
+            dialog = getattr(self, "_form_detection_dialog", None)
+            if dialog is not None:
+                if self._form_suggestions:
+                    page_number = int(
+                        self._form_suggestions[0].get("page", self.current_page)
+                    )
+                    dialog.set_suggestions(
+                        self._form_suggestions,
+                        page_number=page_number,
+                        statistics=self._form_detection_statistics,
+                    )
+                else:
+                    dialog.accept()
+            self.status_bar.showMessage(
+                f"Created {created} suggested field"
+                f"{'s' if created != 1 else ''}. Save the PDF to keep them."
+            )
+            QMessageBox.information(
+                self,
+                "Suggested Fields Created",
+                f"Created {created} form field"
+                f"{'s' if created != 1 else ''}.\n\n"
+                "Save the PDF to keep the new fields.",
+            )
+        if failed:
+            QMessageBox.warning(
+                self, "Some Suggestions Were Not Created",
+                "\n".join(failed[:8]),
+            )
+
+    def set_form_designer_tool(self, tool):
+        if tool not in ({FORM_TOOL_SELECT} | FORM_CREATE_TOOLS):
+            return
+        if not self.pdf_document:
+            return
+        if not self._form_design_mode:
+            self.set_form_design_mode(True)
+        self._form_design_tool = tool
+        self._clear_form_drag()
+        self._update_cursor()
+        self.forms_panel.set_designer_state(
+            True, self._form_design_tool, self._selected_form_record()
+        )
+        self._act_form_designer.blockSignals(True)
+        self._act_form_designer.setChecked(True)
+        self._act_form_designer.blockSignals(False)
+        messages = {
+            FORM_TOOL_SELECT: "Select mode: click a field, drag to move, or drag its lower-right handle to resize.",
+            FORM_TOOL_TEXT: "Text Field tool: drag a rectangle on the page.",
+            FORM_TOOL_CHECKBOX: "Checkbox tool: click or drag on the page.",
+            FORM_TOOL_DROPDOWN: "Dropdown tool: drag a rectangle, then edit its choices in Properties.",
+            FORM_TOOL_DATE: "Date tool: click or drag to add a DD/MM/YYYY field.",
+            FORM_TOOL_RADIO: "Yes / No tool: click or drag to create a linked radio pair.",
+            FORM_TOOL_SIGNATURE: "Signature tool: drag an unsigned PDF signature field.",
+            FORM_TOOL_INITIALS: "Initials tool: click or drag an unsigned initials field.",
+        }
+        self.status_bar.showMessage(messages[tool])
+        self.update_view()
+
+    def _clear_form_drag(self):
+        self._form_drag_action = None
+        self._form_drag_page = -1
+        self._form_drag_start_pdf = None
+        self._form_drag_original_rect = None
+        self._form_preview_rect = None
+
+    def _selected_form_widget(self):
+        if not self.pdf_document or not self._selected_form_ref:
+            return None
+        page_number, xref = self._selected_form_ref
+        for field in self.form_fields.get(page_number, []):
+            if int(field.xref) == int(xref):
+                return field
+        return None
+
+    def _selected_form_record(self):
+        if not self._selected_form_ref:
+            return None
+        page_number, xref = self._selected_form_ref
+        for record in self._form_records():
+            if record["page"] == page_number and int(record["xref"]) == int(xref):
+                return record
+        return None
+
+    def select_form_field(self, page_number, xref):
+        """Select a field from the sidebar when Form Designer is active."""
+        if not self._form_design_mode or not self.pdf_document:
+            return
+        if not any(
+            int(field.xref) == int(xref)
+            for field in self.form_fields.get(int(page_number), [])
+        ):
+            return
+        self._selected_form_ref = (int(page_number), int(xref))
+        self.current_page = int(page_number)
+        self.forms_panel.select_record(page_number, xref)
+        self.forms_panel.set_designer_state(
+            True, self._form_design_tool, self._selected_form_record()
+        )
+        self.update_ui_on_page_change()
+
+    def _select_form_ref(self, page_number, xref):
+        self._selected_form_ref = (int(page_number), int(xref))
+        self.forms_panel.select_record(page_number, xref)
+        self.forms_panel.set_designer_state(
+            self._form_design_mode,
+            self._form_design_tool,
+            self._selected_form_record(),
+        )
+
+    def _field_at_pdf_point(self, page_number, pdf_point):
+        fields = self.form_fields.get(page_number, [])
+        for field in reversed(fields):
+            try:
+                if field.rect.contains(pdf_point):
+                    return field
+            except Exception:
+                continue
+        return None
+
+    def _constrain_form_rect(self, page_number, rect, field_type):
+        page = self.pdf_document.load_page(page_number)
+        if field_type in (
+            fitz.PDF_WIDGET_TYPE_CHECKBOX,
+            fitz.PDF_WIDGET_TYPE_RADIOBUTTON,
+        ):
+            minimum = (MIN_CHECKBOX_SIZE, MIN_CHECKBOX_SIZE)
+        elif field_type == fitz.PDF_WIDGET_TYPE_SIGNATURE:
+            minimum = MIN_SIGNATURE_SIZE
+        elif field_type in (
+            fitz.PDF_WIDGET_TYPE_COMBOBOX,
+            fitz.PDF_WIDGET_TYPE_LISTBOX,
+        ):
+            minimum = MIN_CHOICE_SIZE
+        else:
+            minimum = MIN_TEXT_SIZE
+        return normalise_rect(
+            fitz.Rect(rect), page.rect,
+            min_width=minimum[0], min_height=minimum[1],
+        )
+
+    def _paint_form_designer_overlay(self, painter, page_number):
+        """Draw field outlines and the active drag preview onto the page pixmap."""
+        matrix = fitz.Matrix(self.zoom_level, self.zoom_level).prerotate(self.rotation)
+        selected_xref = (
+            self._selected_form_ref[1]
+            if self._selected_form_ref and self._selected_form_ref[0] == page_number
+            else None
+        )
+
+        for field in self.form_fields.get(page_number, []):
+            tr = field.rect * matrix
+            selected = int(field.xref) == int(selected_xref or -1)
+            colour = QColor(24, 115, 204, 235) if selected else QColor(30, 145, 90, 190)
+            painter.setPen(QPen(colour, 2 if selected else 1, Qt.PenStyle.SolidLine))
+            painter.setBrush(QColor(colour.red(), colour.green(), colour.blue(), 28))
+            painter.drawRect(QRectF(tr.x0, tr.y0, tr.width, tr.height))
+            if selected:
+                handle = 9
+                painter.setBrush(colour)
+                painter.drawRect(QRectF(tr.x1 - handle, tr.y1 - handle, handle, handle))
+
+        if self._form_preview_rect is not None and self._form_drag_page == page_number:
+            tr = self._form_preview_rect * matrix
+            painter.setPen(QPen(QColor(225, 120, 15, 235), 2, Qt.PenStyle.DashLine))
+            painter.setBrush(QColor(255, 165, 40, 35))
+            painter.drawRect(QRectF(tr.x0, tr.y0, tr.width, tr.height))
+
+    def _handle_form_designer_press(self, event, page_widget, page_number, px, py):
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        pdf_point = self._to_pdf_point(px, py)
+        if pdf_point is None:
+            return
+        page_rect = self.pdf_document.load_page(page_number).rect
+        if not page_rect.contains(pdf_point):
+            return
+
+        self._form_drag_page = page_number
+        self._form_drag_start_pdf = pdf_point
+
+        if self._form_design_tool in FORM_CREATE_TOOLS:
+            self._form_drag_action = "create"
+            self._form_preview_rect = fitz.Rect(pdf_point, pdf_point)
+            self.render_page_content(page_number, page_widget)
+            return
+
+        field = self._field_at_pdf_point(page_number, pdf_point)
+        if field is None:
+            self._selected_form_ref = None
+            self._clear_form_drag()
+            self.forms_panel.set_designer_state(True, self._form_design_tool, None)
+            self.update_view()
+            return
+
+        self._select_form_ref(page_number, field.xref)
+        self._form_drag_original_rect = fitz.Rect(field.rect)
+        transformed = field.rect * fitz.Matrix(
+            self.zoom_level, self.zoom_level
+        ).prerotate(self.rotation)
+        near_handle = abs(px - transformed.x1) <= 12 and abs(py - transformed.y1) <= 12
+        self._form_drag_action = "resize" if near_handle else "move"
+        self._form_preview_rect = fitz.Rect(field.rect)
+        self.render_page_content(page_number, page_widget)
+
+    def _handle_form_designer_move(self, event, page_widget, page_number, px, py):
+        if (
+            self._form_drag_action is None
+            or self._form_drag_page != page_number
+            or not (event.buttons() & Qt.MouseButton.LeftButton)
+        ):
+            return
+        current = self._to_pdf_point(px, py)
+        if current is None or self._form_drag_start_pdf is None:
+            return
+
+        if self._form_drag_action == "create":
+            rect = fitz.Rect(self._form_drag_start_pdf, current)
+            field_type = {
+                FORM_TOOL_CHECKBOX: fitz.PDF_WIDGET_TYPE_CHECKBOX,
+                FORM_TOOL_DROPDOWN: fitz.PDF_WIDGET_TYPE_COMBOBOX,
+                FORM_TOOL_RADIO: fitz.PDF_WIDGET_TYPE_RADIOBUTTON,
+                FORM_TOOL_SIGNATURE: fitz.PDF_WIDGET_TYPE_SIGNATURE,
+                FORM_TOOL_INITIALS: fitz.PDF_WIDGET_TYPE_SIGNATURE,
+            }.get(self._form_design_tool, fitz.PDF_WIDGET_TYPE_TEXT)
+            if self._form_design_tool == FORM_TOOL_RADIO:
+                page = self.pdf_document.load_page(page_number)
+                self._form_preview_rect = normalise_rect(
+                    rect, page.rect,
+                    min_width=MIN_CHECKBOX_SIZE * 2,
+                    min_height=MIN_CHECKBOX_SIZE,
+                )
+            else:
+                self._form_preview_rect = self._constrain_form_rect(
+                    page_number, rect, field_type
+                )
+        elif self._form_drag_original_rect is not None:
+            field = self._selected_form_widget()
+            if field is None:
+                return
+            original = fitz.Rect(self._form_drag_original_rect)
+            if self._form_drag_action == "move":
+                dx = current.x - self._form_drag_start_pdf.x
+                dy = current.y - self._form_drag_start_pdf.y
+                rect = fitz.Rect(
+                    original.x0 + dx, original.y0 + dy,
+                    original.x1 + dx, original.y1 + dy,
+                )
+            else:
+                rect = fitz.Rect(original.x0, original.y0, current.x, current.y)
+            self._form_preview_rect = self._constrain_form_rect(
+                page_number, rect, field.field_type
+            )
+        self.render_page_content(page_number, page_widget)
+
+    def _handle_form_designer_release(self, event, page_widget, page_number, px, py):
+        if event.button() != Qt.MouseButton.LeftButton or self._form_drag_action is None:
+            return
+        if self._form_drag_page != page_number:
+            self._clear_form_drag()
+            return
+
+        action = self._form_drag_action
+        preview = fitz.Rect(self._form_preview_rect) if self._form_preview_rect else None
+        start = self._form_drag_start_pdf
+        try:
+            if action == "create":
+                if start is None:
+                    return
+                current = self._to_pdf_point(px, py) or start
+                dragged = abs(current.x - start.x) >= 4 or abs(current.y - start.y) >= 4
+                if not dragged:
+                    default_width, default_height = {
+                        FORM_TOOL_TEXT: DEFAULT_TEXT_SIZE,
+                        FORM_TOOL_CHECKBOX: (DEFAULT_CHECKBOX_SIZE, DEFAULT_CHECKBOX_SIZE),
+                        FORM_TOOL_DROPDOWN: DEFAULT_DROPDOWN_SIZE,
+                        FORM_TOOL_DATE: DEFAULT_DATE_SIZE,
+                        FORM_TOOL_RADIO: DEFAULT_RADIO_GROUP_SIZE,
+                        FORM_TOOL_SIGNATURE: DEFAULT_SIGNATURE_SIZE,
+                        FORM_TOOL_INITIALS: DEFAULT_INITIALS_SIZE,
+                    }[self._form_design_tool]
+                    preview = fitz.Rect(
+                        start.x, start.y,
+                        start.x + default_width, start.y + default_height,
+                    )
+
+                if self._form_design_tool == FORM_TOOL_TEXT:
+                    field = add_text_field(self.pdf_document, page_number, preview)
+                    created_fields = [field]
+                elif self._form_design_tool == FORM_TOOL_CHECKBOX:
+                    field = add_checkbox_field(self.pdf_document, page_number, preview)
+                    created_fields = [field]
+                elif self._form_design_tool == FORM_TOOL_DROPDOWN:
+                    field = add_dropdown_field(self.pdf_document, page_number, preview)
+                    created_fields = [field]
+                elif self._form_design_tool == FORM_TOOL_DATE:
+                    field = add_date_field(self.pdf_document, page_number, preview)
+                    created_fields = [field]
+                elif self._form_design_tool == FORM_TOOL_RADIO:
+                    created_fields = add_radio_group(
+                        self.pdf_document, page_number, preview
+                    )
+                    field = created_fields[0]
+                elif self._form_design_tool == FORM_TOOL_SIGNATURE:
+                    field = add_signature_field(
+                        self.pdf_document, page_number, preview, initials=False
+                    )
+                    created_fields = [field]
+                else:
+                    field = add_signature_field(
+                        self.pdf_document, page_number, preview, initials=True
+                    )
+                    created_fields = [field]
+
+                selected_ref = (page_number, int(field.xref))
+                if len(created_fields) > 1:
+                    message = f"Added linked Yes / No radio group '{field.field_name}'."
+                else:
+                    message = (
+                        f"Added {self._form_field_type_name(field)} "
+                        f"'{field.field_name}'."
+                    )
+            else:
+                if preview is None or not self._selected_form_ref:
+                    return
+                selected_ref = self._selected_form_ref
+                field = move_or_resize_widget(
+                    self.pdf_document, selected_ref[0], selected_ref[1], preview
+                )
+                message = (
+                    f"{'Resized' if action == 'resize' else 'Moved'} field "
+                    f"'{field.field_name}'."
+                )
+
+            self._form_dirty = True
+            self._mark_modified()
+            self._reload_form_cache()
+            self._selected_form_ref = selected_ref
+            self.refresh_forms_panel()
+            self.forms_panel.select_record(*selected_ref)
+            self.status_bar.showMessage(message + " Save the PDF to keep this change.")
+        except Exception as exc:
+            QMessageBox.warning(
+                self, "Form Designer",
+                f"The field could not be changed.\n\n{type(exc).__name__}: {exc}",
+            )
+        finally:
+            self._clear_form_drag()
+            self.update_view()
+
+    def delete_selected_form_field(self):
+        field = self._selected_form_widget()
+        if field is None or not self._selected_form_ref:
+            self.status_bar.showMessage("Select a form field first.")
+            return
+        page_number, xref = self._selected_form_ref
+        name = field.field_name or "Unnamed field"
+        reply = QMessageBox.question(
+            self, "Delete Form Field",
+            f'Delete the field "{name}" from page {page_number + 1}?',
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            if not delete_form_widget_core(self.pdf_document, page_number, xref):
+                raise LookupError("The selected field no longer exists.")
+            self._selected_form_ref = None
+            self._form_dirty = True
+            self._mark_modified()
+            self._reload_form_cache()
+            self.refresh_forms_panel()
+            self.update_view()
+            self.status_bar.showMessage(
+                f'Deleted field "{name}". Save the PDF to keep this change.'
+            )
+        except Exception as exc:
+            QMessageBox.warning(self, "Delete Form Field", str(exc))
+
+    def edit_selected_form_properties(self):
+        field = self._selected_form_widget()
+        if field is None or not self._selected_form_ref:
+            self.status_bar.showMessage("Select a form field first.")
+            return
+        if field.field_type not in (
+            fitz.PDF_WIDGET_TYPE_TEXT,
+            fitz.PDF_WIDGET_TYPE_CHECKBOX,
+            fitz.PDF_WIDGET_TYPE_COMBOBOX,
+            fitz.PDF_WIDGET_TYPE_RADIOBUTTON,
+            fitz.PDF_WIDGET_TYPE_SIGNATURE,
+        ):
+            QMessageBox.information(
+                self, "Form Field Properties",
+                "Properties are not editable for this field type. It can still "
+                "be moved, resized, or deleted.",
+            )
+            return
+        dialog = FormFieldPropertiesDialog(
+            field, self,
+            custom_kind=widget_custom_kind(self.pdf_document, int(field.xref)),
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        page_number, xref = self._selected_form_ref
+        try:
+            update_widget_properties(
+                self.pdf_document, page_number, xref, **dialog.values()
+            )
+            self._form_dirty = True
+            self._mark_modified()
+            self._reload_form_cache()
+            self._selected_form_ref = (page_number, xref)
+            self.refresh_forms_panel()
+            self.forms_panel.select_record(page_number, xref)
+            self.update_view()
+            self.status_bar.showMessage("Form field properties updated.")
+        except ValueError as exc:
+            QMessageBox.warning(self, "Form Field Properties", str(exc))
+        except Exception as exc:
+            QMessageBox.warning(
+                self, "Form Field Properties",
+                f"The field could not be updated.\n\n{type(exc).__name__}: {exc}",
+            )
+
+    # =========================================================================
+    # Existing AcroForm fields
+    # =========================================================================
+
+    def _reload_form_cache(self):
+        """Reload pages and live Widget objects from the current document."""
+        self.form_fields = {}
+        self.field_widgets = {}
+        self._radio_groups = {}
+        self.pages = []
+        if not self.pdf_document:
+            return
+        for pn in range(self.pdf_document.page_count):
+            page = self.pdf_document.load_page(pn)
+            self.pages.append(page)
+            self.form_fields[pn] = list(page.widgets() or [])
+
+    @staticmethod
+    def _form_field_type_name(field):
+        return getattr(field, "field_type_string", None) or {
+            fitz.PDF_WIDGET_TYPE_BUTTON: "Button",
+            fitz.PDF_WIDGET_TYPE_CHECKBOX: "Checkbox",
+            fitz.PDF_WIDGET_TYPE_COMBOBOX: "Dropdown",
+            fitz.PDF_WIDGET_TYPE_LISTBOX: "List",
+            fitz.PDF_WIDGET_TYPE_RADIOBUTTON: "Radio",
+            fitz.PDF_WIDGET_TYPE_SIGNATURE: "Signature",
+            fitz.PDF_WIDGET_TYPE_TEXT: "Text",
+        }.get(field.field_type, "Unknown")
+
+    def _form_records(self):
+        records = []
+        for page_num, fields in self.form_fields.items():
+            for field in fields:
+                flags = int(getattr(field, "field_flags", 0) or 0)
+                rect = field.rect
+                kind = widget_custom_kind(self.pdf_document, int(field.xref))
+                type_name = self._form_field_type_name(field)
+                if kind == KIND_DATE:
+                    type_name = "Date"
+                elif kind == KIND_INITIALS:
+                    type_name = "Initials"
+                option = radio_option_label(self.pdf_document, int(field.xref))
+                records.append({
+                    "page": page_num,
+                    "name": field.field_name or getattr(field, "field_label", "") or "Unnamed field",
+                    "type": field.field_type,
+                    "type_name": type_name + (f" ({option})" if option else ""),
+                    "value": field.field_value,
+                    "required": bool(flags & fitz.PDF_FIELD_IS_REQUIRED),
+                    "read_only": bool(flags & fitz.PDF_FIELD_IS_READ_ONLY),
+                    "rect": [rect.x0, rect.y0, rect.x1, rect.y1],
+                    "xref": field.xref,
+                })
+        return records
+
+    def refresh_forms_panel(self):
+        records = self._form_records() if self.pdf_document else []
+        self.forms_panel.set_document_fields(
+            records, document_open=bool(self.pdf_document)
+        )
+        self.forms_panel.set_highlight_checked(self._form_highlighting)
+        self.forms_panel.set_designer_state(
+            self._form_design_mode,
+            self._form_design_tool,
+            self._selected_form_record(),
+        )
+        has_fields = bool(records)
+        self._act_reset_form.setEnabled(has_fields)
+        self._act_reset_all_forms.setEnabled(has_fields)
+        self._act_flatten_form.setEnabled(has_fields)
+        self._act_form_designer.blockSignals(True)
+        self._act_form_designer.setChecked(self._form_design_mode)
+        self._act_detect_form_fields.setEnabled(bool(self.pdf_document))
+        self._act_form_designer.blockSignals(False)
+        has_selected = bool(self._form_design_mode and self._selected_form_record())
+        self._act_form_properties.setEnabled(has_selected)
+        self._act_delete_form_field.setEnabled(has_selected)
+        if has_fields:
+            self.status_bar.showMessage(
+                f"Interactive form detected: {len(records)} field"
+                f"{'s' if len(records) != 1 else ''}. Use the Forms panel to fill it."
+            )
+
+    def _field_tooltip(self, field, note=""):
+        flags = int(getattr(field, "field_flags", 0) or 0)
+        parts = [
+            field.field_name or getattr(field, "field_label", "") or "Unnamed field",
+            self._form_field_type_name(field),
+        ]
+        if flags & fitz.PDF_FIELD_IS_REQUIRED:
+            parts.append("Required")
+        if flags & fitz.PDF_FIELD_IS_READ_ONLY:
+            parts.append("Read-only")
+        if note:
+            parts.append(note)
+        return " · ".join(parts)
+
+    def _style_form_widget(self, qt_widget, field, rect_height=None):
+        flags = int(getattr(field, "field_flags", 0) or 0)
+        read_only = bool(flags & fitz.PDF_FIELD_IS_READ_ONLY)
+        base = {"medium": 13, "large": 16, "xlarge": 20}.get(
+            getattr(self, "ui_size", "medium"), 13)
+        font_size = max(10, min(base, int((rect_height or 22) * 0.6)))
+
+        if self._form_highlighting:
+            border = "#8a6d00" if read_only else "#2675c7"
+            background = "rgba(245,240,205,190)" if read_only else "rgba(220,238,255,205)"
+        else:
+            border = "transparent"
+            background = "rgba(255,255,255,18)"
+
+        qt_widget.setStyleSheet(
+            f"border: 1px solid {border}; background: {background}; "
+            f"border-radius: 2px; font-size: {font_size}px;"
+        )
+        qt_widget.setEnabled(not read_only)
 
     def _render_form_fields(self, page_num, widget):
         if page_num in self.field_widgets:
-            for fw in self.field_widgets[page_num]:
-                fw.deleteLater()
+            for qt_widget, _field in self.field_widgets[page_num]:
+                qt_widget.hide()
+                qt_widget.deleteLater()
             del self.field_widgets[page_num]
 
-        if page_num not in self.form_fields or not self.form_fields[page_num]:
+        fields = self.form_fields.get(page_num, [])
+        if self._form_design_mode or not fields:
             return
 
-        # Form-field text scales with the accessibility text-size setting,
-        # capped by the field's own height so it never overflows.
-        _base = {"medium": 13, "large": 16, "xlarge": 20}.get(
-            getattr(self, "ui_size", "medium"), 13)
-
-        label_size  = widget.size()
+        label_size = widget.size()
         pixmap_size = widget.pixmap().size() if widget.pixmap() else QSize(0, 0)
-        x_offset = (label_size.width()  - pixmap_size.width())  // 2
+        x_offset = (label_size.width() - pixmap_size.width()) // 2
         y_offset = (label_size.height() - pixmap_size.height()) // 2
-        matrix   = fitz.Matrix(self.zoom_level, self.zoom_level).prerotate(self.rotation)
+        matrix = fitz.Matrix(self.zoom_level, self.zoom_level).prerotate(self.rotation)
         self.field_widgets[page_num] = []
 
-        for field in self.form_fields[page_num]:
+        for field in fields:
             tr = field.rect * matrix
+            x = int(tr.x0 + x_offset)
+            y = int(tr.y0 + y_offset)
+            width = max(12, int(tr.width))
+            height = max(12, int(tr.height))
             ftype = field.field_type
+            flags = int(getattr(field, "field_flags", 0) or 0)
+            value = field.field_value
+            qt_widget = None
 
             if ftype == fitz.PDF_WIDGET_TYPE_TEXT:
-                multiline = bool(field.field_flags & fitz.PDF_TX_FIELD_IS_MULTILINE)
-                if multiline:
-                    fw = QTextEdit(widget)
-                    fw.setPlainText(field.field_value or "")
-                    fw.textChanged.connect(
-                        lambda f=field, te=fw: self._update_pdf_field(f, te.toPlainText()))
+                kind = widget_custom_kind(self.pdf_document, int(field.xref))
+                multiline = bool(flags & fitz.PDF_TX_FIELD_IS_MULTILINE)
+                if kind == KIND_DATE:
+                    qt_widget = QDateEdit(widget)
+                    qt_widget.setCalendarPopup(True)
+                    qt_widget.setDisplayFormat("dd/MM/yyyy")
+                    empty_date = QDate(1900, 1, 1)
+                    qt_widget.setMinimumDate(empty_date)
+                    qt_widget.setSpecialValueText("Not set")
+                    parsed = QDate.fromString(str(value or ""), "dd/MM/yyyy")
+                    qt_widget.setDate(parsed if parsed.isValid() else empty_date)
+                    qt_widget.dateChanged.connect(
+                        lambda date, f=field, sentinel=empty_date:
+                            self._update_pdf_field(
+                                f, "" if date == sentinel else date.toString("dd/MM/yyyy")
+                            )
+                    )
+                elif multiline:
+                    qt_widget = QTextEdit(widget)
+                    qt_widget.setPlainText(str(value or ""))
+                    qt_widget.textChanged.connect(
+                        lambda f=field, control=qt_widget:
+                            self._update_pdf_field(f, control.toPlainText())
+                    )
                 else:
-                    fw = QLineEdit(widget)
-                    fw.setText(field.field_value or "")
-                    fw.editingFinished.connect(
-                        lambda f=field, le=fw: self._update_pdf_field(f, le.text()))
-                fw.setGeometry(int(tr.x0 + x_offset), int(tr.y0 + y_offset),
-                               int(tr.width), int(tr.height))
-                _fs = max(11, min(_base, int(tr.height * 0.6)))
-                fw.setStyleSheet(
-                    "border: 1px solid #4a90d9; background: rgba(220,235,255,180);"
-                    f"border-radius: 2px; font-size: {_fs}px;")
-                fw.setToolTip(field.field_name or "Text field")
-                self.field_widgets[page_num].append(fw)
-                fw.show()
+                    qt_widget = QLineEdit(widget)
+                    qt_widget.setText(str(value or ""))
+                    if flags & fitz.PDF_TX_FIELD_IS_PASSWORD:
+                        qt_widget.setEchoMode(QLineEdit.EchoMode.Password)
+                    max_len = int(getattr(field, "text_maxlen", 0) or 0)
+                    if max_len > 0:
+                        qt_widget.setMaxLength(max_len)
+                    qt_widget.textEdited.connect(
+                        lambda text, f=field: self._update_pdf_field(f, text)
+                    )
+                qt_widget.setGeometry(x, y, width, height)
 
             elif ftype == fitz.PDF_WIDGET_TYPE_CHECKBOX:
-                fw = QCheckBox(widget)
-                fw.setChecked(field.field_value not in ("", "Off", None))
-                cb_size = min(int(tr.width), int(tr.height))
-                fw.setGeometry(int(tr.x0 + x_offset), int(tr.y0 + y_offset),
-                               cb_size, cb_size)
-                fw.stateChanged.connect(
-                    lambda state, f=field: self._save_checkbox_field(f, state))
-                fw.setToolTip(field.field_name or "Checkbox")
-                self.field_widgets[page_num].append(fw)
-                fw.show()
+                qt_widget = QCheckBox(widget)
+                qt_widget.setChecked(value not in (None, "", "Off", False, 0))
+                size = max(16, min(width, height))
+                qt_widget.setGeometry(x, y, size, size)
+                qt_widget.toggled.connect(
+                    lambda checked, f=field: self._save_button_field(f, checked)
+                )
 
             elif ftype == fitz.PDF_WIDGET_TYPE_RADIOBUTTON:
-                fw = QRadioButton(widget)
-                fw.setChecked(field.field_value not in ("", "Off", None))
-                rb_size = min(int(tr.width), int(tr.height))
-                fw.setGeometry(int(tr.x0 + x_offset), int(tr.y0 + y_offset),
-                               rb_size, rb_size)
-                fw.toggled.connect(
-                    lambda checked, f=field: self._update_pdf_field(
-                        f, f.field_name if checked else "Off"))
-                fw.setToolTip(field.field_name or "Radio button")
-                self.field_widgets[page_num].append(fw)
-                fw.show()
+                qt_widget = QRadioButton(widget)
+                qt_widget.setChecked(value not in (None, "", "Off", False, 0))
+                size = max(16, min(width, height))
+                qt_widget.setGeometry(x, y, size, size)
+                group_key = (page_num, field.field_name or f"xref-{field.xref}")
+                group = self._radio_groups.get(group_key)
+                if group is None:
+                    group = QButtonGroup(widget)
+                    group.setExclusive(True)
+                    self._radio_groups[group_key] = group
+                group.addButton(qt_widget)
+                qt_widget.toggled.connect(
+                    lambda checked, f=field:
+                        self._save_button_field(f, True) if checked else None
+                )
 
             elif ftype == fitz.PDF_WIDGET_TYPE_COMBOBOX:
-                fw = QComboBox(widget)
-                for choice in (field.choice_values or []):
-                    fw.addItem(choice)
-                if field.field_value:
-                    idx = fw.findText(field.field_value)
+                qt_widget = QComboBox(widget)
+                choices = [str(choice) for choice in (field.choice_values or [])]
+                qt_widget.addItems(choices)
+                qt_widget.setEditable(bool(flags & fitz.PDF_CH_FIELD_IS_EDIT))
+                if value not in (None, ""):
+                    idx = qt_widget.findText(str(value))
                     if idx >= 0:
-                        fw.setCurrentIndex(idx)
-                fw.setGeometry(int(tr.x0 + x_offset), int(tr.y0 + y_offset),
-                               int(tr.width), int(tr.height))
-                fw.currentTextChanged.connect(
-                    lambda txt, f=field: self._update_pdf_field(f, txt))
-                fw.setToolTip(field.field_name or "Combo box")
-                self.field_widgets[page_num].append(fw)
-                fw.show()
+                        qt_widget.setCurrentIndex(idx)
+                    elif qt_widget.isEditable():
+                        qt_widget.setEditText(str(value))
+                qt_widget.setGeometry(x, y, width, height)
+                qt_widget.currentTextChanged.connect(
+                    lambda text, f=field: self._update_pdf_field(f, text)
+                )
 
             elif ftype == fitz.PDF_WIDGET_TYPE_LISTBOX:
-                fw = QListWidgetItem()  # placeholder; list boxes are rare
-                # A full listbox widget could be added here if needed
+                qt_widget = QListWidget(widget)
+                multi = bool(flags & fitz.PDF_CH_FIELD_IS_MULTI_SELECT)
+                # PyMuPDF 1.26 cannot write a Python list to /V reliably.
+                # Keep editing deterministic by allowing one saved selection.
+                qt_widget.setSelectionMode(
+                    QAbstractItemView.SelectionMode.SingleSelection
+                )
+                selected = set(value if isinstance(value, (list, tuple)) else [value])
+                for choice in (field.choice_values or []):
+                    item = QListWidgetItem(str(choice))
+                    qt_widget.addItem(item)
+                    item.setSelected(choice in selected or str(choice) in {str(v) for v in selected})
+                qt_widget.setGeometry(x, y, width, max(height, 42))
+                qt_widget.itemSelectionChanged.connect(
+                    lambda f=field, control=qt_widget:
+                        self._save_list_field(f, control)
+                )
+                if multi:
+                    qt_widget.setToolTip(self._field_tooltip(
+                        field, "Multi-select form detected; this release saves one selection"))
+
+            elif ftype == fitz.PDF_WIDGET_TYPE_SIGNATURE:
+                kind = widget_custom_kind(self.pdf_document, int(field.xref))
+                unsigned_label = "Initials field" if kind == KIND_INITIALS else "Signature field"
+                qt_widget = QPushButton(
+                    "Signed" if bool(getattr(field, "is_signed", False)) else unsigned_label,
+                    widget,
+                )
+                qt_widget.setGeometry(x, y, width, height)
+                qt_widget.setEnabled(False)
+                qt_widget.setToolTip(self._field_tooltip(
+                    field, "Detected; cryptographic PDF signing is not yet supported"))
+
+            elif ftype == fitz.PDF_WIDGET_TYPE_BUTTON:
+                caption = getattr(field, "button_caption", None) or "PDF button"
+                qt_widget = QPushButton(str(caption), widget)
+                qt_widget.setGeometry(x, y, width, height)
+                qt_widget.setEnabled(False)
+                qt_widget.setToolTip(self._field_tooltip(
+                    field, "Disabled because embedded PDF actions and JavaScript are not executed"))
+
+            else:
+                qt_widget = QLabel("Unsupported field", widget)
+                qt_widget.setGeometry(x, y, width, height)
+
+            if qt_widget is None:
+                continue
+            if ftype not in (fitz.PDF_WIDGET_TYPE_SIGNATURE, fitz.PDF_WIDGET_TYPE_BUTTON):
+                if not qt_widget.toolTip():
+                    qt_widget.setToolTip(self._field_tooltip(field))
+                self._style_form_widget(qt_widget, field, height)
+            self.field_widgets[page_num].append((qt_widget, field))
+            qt_widget.show()
 
         widget.update()
 
     def _reposition_form_fields(self, page_num, widget):
-        """Reposition existing Qt form widgets when the page label resizes."""
-        if page_num not in self.field_widgets or \
-                page_num not in self.form_fields:
+        """Reposition existing Qt form controls when a page label resizes."""
+        if self._form_design_mode:
             return
-        label_size  = widget.size()
+        pairs = self.field_widgets.get(page_num, [])
+        if not pairs:
+            return
+        label_size = widget.size()
         pixmap_size = widget.pixmap().size() if widget.pixmap() else QSize(0, 0)
-        x_offset = (label_size.width()  - pixmap_size.width())  // 2
+        x_offset = (label_size.width() - pixmap_size.width()) // 2
         y_offset = (label_size.height() - pixmap_size.height()) // 2
-        matrix   = fitz.Matrix(self.zoom_level, self.zoom_level).prerotate(self.rotation)
-        for fw, field in zip(self.field_widgets[page_num], self.form_fields[page_num]):
+        matrix = fitz.Matrix(self.zoom_level, self.zoom_level).prerotate(self.rotation)
+        for qt_widget, field in pairs:
             tr = field.rect * matrix
-            fw.setGeometry(int(tr.x0 + x_offset), int(tr.y0 + y_offset),
-                           int(tr.width), int(tr.height))
+            width = max(12, int(tr.width))
+            height = max(12, int(tr.height))
+            if field.field_type in (fitz.PDF_WIDGET_TYPE_CHECKBOX,
+                                    fitz.PDF_WIDGET_TYPE_RADIOBUTTON):
+                width = height = max(16, min(width, height))
+            elif field.field_type == fitz.PDF_WIDGET_TYPE_LISTBOX:
+                height = max(height, 42)
+            qt_widget.setGeometry(
+                int(tr.x0 + x_offset), int(tr.y0 + y_offset), width, height)
 
-    def _update_pdf_field(self, field, value):
+    def _update_pdf_field(self, field, value, mark_modified=True):
         try:
+            if field.field_value == value:
+                return
             field.field_value = value
             field.update()
-            self._form_dirty = True
-        except Exception as e:
-            self.status_bar.showMessage(f"Field update error: {e}")
+            if mark_modified:
+                self._form_dirty = True
+                self._mark_modified()
+        except Exception as exc:
+            self.status_bar.showMessage(f"Field update error: {exc}")
 
-    def _save_checkbox_field(self, fitz_widget, state):
+    def _save_button_field(self, field, checked):
+        # PyMuPDF resolves True to the field's actual PDF on-state name.
+        self._update_pdf_field(field, bool(checked))
+
+    def _save_list_field(self, field, control):
+        values = [item.text() for item in control.selectedItems()]
+        self._update_pdf_field(field, values[0] if values else "")
+
+    def _flush_form_controls(self):
+        """Push every visible control into its Widget before saving/copying."""
+        for pairs in self.field_widgets.values():
+            for control, field in pairs:
+                if isinstance(control, QLineEdit):
+                    self._update_pdf_field(field, control.text(), mark_modified=False)
+                elif isinstance(control, QTextEdit):
+                    self._update_pdf_field(field, control.toPlainText(), mark_modified=False)
+                elif isinstance(control, QDateEdit):
+                    date = control.date()
+                    value = "" if date == control.minimumDate() else date.toString("dd/MM/yyyy")
+                    self._update_pdf_field(field, value, mark_modified=False)
+                elif isinstance(control, QCheckBox):
+                    self._update_pdf_field(field, control.isChecked(), mark_modified=False)
+                elif isinstance(control, QRadioButton) and control.isChecked():
+                    self._update_pdf_field(field, True, mark_modified=False)
+                elif isinstance(control, QComboBox):
+                    self._update_pdf_field(field, control.currentText(), mark_modified=False)
+                elif isinstance(control, QListWidget):
+                    values = [item.text() for item in control.selectedItems()]
+                    self._update_pdf_field(
+                        field, values[0] if values else "", mark_modified=False)
+
+    def set_form_highlighting(self, enabled):
+        self._form_highlighting = bool(enabled)
+        for pairs in self.field_widgets.values():
+            for control, field in pairs:
+                if field.field_type not in (fitz.PDF_WIDGET_TYPE_SIGNATURE,
+                                            fitz.PDF_WIDGET_TYPE_BUTTON):
+                    self._style_form_widget(control, field, control.height())
+
+    def jump_to_form_field(self, page_num, x, y):
+        if not self.pdf_document or not (0 <= page_num < self.total_pages):
+            return
+        self.current_page = page_num
+        self.update_ui_on_page_change()
+        self.scroll_to_page(page_num)
+        from PyQt6.QtCore import QTimer
+
+        def focus_matching_control():
+            for control, field in self.field_widgets.get(page_num, []):
+                if abs(field.rect.x0 - x) < 1 and abs(field.rect.y0 - y) < 1:
+                    if control.isEnabled():
+                        control.setFocus()
+                    break
+        QTimer.singleShot(0, focus_matching_control)
+
+    def _reset_form_pages(self, page_numbers):
+        changed = 0
         try:
-            field_values = fitz_widget.field_values()
-            off_val = field_values[0] if len(field_values) > 0 else "Off"
-            on_val  = field_values[1] if len(field_values) > 1 else "Yes"
-        except (AttributeError, TypeError):
-            off_val, on_val = "Off", "Yes"
-        value = on_val if state == Qt.CheckState.Checked.value else off_val
+            for page_num in page_numbers:
+                page = self.pdf_document.load_page(page_num)
+                for field in list(page.widgets() or []):
+                    default = getattr(field, "field_value_default", None)
+                    if field.field_type in (fitz.PDF_WIDGET_TYPE_CHECKBOX,
+                                            fitz.PDF_WIDGET_TYPE_RADIOBUTTON):
+                        field.field_value = default not in (None, "", "Off", False, 0)
+                    else:
+                        field.field_value = default or ""
+                    field.update()
+                    changed += 1
+            self._reload_form_cache()
+            self._form_dirty = bool(changed)
+            if changed:
+                self._mark_modified()
+            self.update_view()
+            self.refresh_forms_panel()
+            return changed
+        except Exception as exc:
+            QMessageBox.critical(self, "Reset Form Error", str(exc))
+            return 0
+
+    def reset_form(self):
+        if not self.pdf_document:
+            return
+        fields = self.form_fields.get(self.current_page, [])
+        if not fields:
+            self.status_bar.showMessage("No form fields on this page.")
+            return
+        reply = QMessageBox.question(
+            self, "Reset Form Page",
+            f"Reset all {len(fields)} form field(s) on page {self.current_page + 1}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            changed = self._reset_form_pages([self.current_page])
+            self.status_bar.showMessage(f"Reset {changed} field(s) on this page.")
+
+    def reset_all_forms(self):
+        if not self.pdf_document:
+            return
+        count = sum(len(fields) for fields in self.form_fields.values())
+        if not count:
+            self.status_bar.showMessage("This document has no form fields.")
+            return
+        reply = QMessageBox.warning(
+            self, "Reset Entire Form",
+            f"Reset all {count} form fields in this document?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No)
+        if reply == QMessageBox.StandardButton.Yes:
+            changed = self._reset_form_pages(range(self.total_pages))
+            self.status_bar.showMessage(f"Reset {changed} form field(s).")
+
+    def flatten_form_to_copy(self):
+        """Bake widget appearances into a separate PDF, preserving the source."""
+        if not self.pdf_document:
+            return
+        count = sum(len(fields) for fields in self.form_fields.values())
+        if not count:
+            QMessageBox.information(self, "Flatten Form",
+                                    "This document has no interactive form fields.")
+            return
+
+        base, _ext = os.path.splitext(self.pdf_file_path or "form.pdf")
+        default = base + "_filled_flattened.pdf"
+        output_path, _ = QFileDialog.getSaveFileName(
+            self, "Flatten Form to Copy", default, "PDF Files (*.pdf)")
+        if not output_path:
+            return
+        if not output_path.lower().endswith(".pdf"):
+            output_path += ".pdf"
+        if self.pdf_file_path and os.path.abspath(output_path) == os.path.abspath(self.pdf_file_path):
+            QMessageBox.warning(
+                self, "Choose a Different File",
+                "Flattening is intentionally copy-only. Choose a different filename "
+                "so the editable original is preserved.")
+            return
+
+        reply = QMessageBox.warning(
+            self, "Create Flattened Copy",
+            "The new copy will preserve the visible answers but its form fields "
+            "will no longer be editable.\n\n"
+            "The original PDF will not be changed.\n\n"
+            "Continue?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No)
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        self._prepare_document_for_save()
+        clone = None
         try:
-            fitz_widget.field_value = value
-            fitz_widget.update()
-            self._form_dirty = True
-        except Exception as e:
-            self.status_bar.showMessage(f"Checkbox error: {e}")
+            clone = fitz.open()
+            clone.insert_pdf(
+                self.pdf_document, annots=True, widgets=True,
+                join_duplicates=True)
+            clone.bake(annots=False, widgets=True)
+            clone.save(output_path, garbage=4, deflate=True)
+            clone.close()
+            clone = None
+
+            check = fitz.open(output_path)
+            remaining = sum(len(list(page.widgets() or [])) for page in check)
+            check.close()
+            if remaining:
+                raise RuntimeError(
+                    f"Flatten verification failed: {remaining} interactive "
+                    "field(s) remain in the output.")
+
+            QMessageBox.information(
+                self, "Flattened Copy Created",
+                f"Created a non-editable filled copy with {count} field(s) baked "
+                f"into the pages:\n\n{output_path}\n\n"
+                "The original remains editable.")
+            self.status_bar.showMessage(f"Flattened form copy saved: {output_path}")
+        except Exception as exc:
+            QMessageBox.critical(
+                self, "Flatten Form Error",
+                "The flattened copy could not be created. The original was not "
+                f"changed.\n\n{type(exc).__name__}: {exc}")
+            try:
+                if output_path and os.path.exists(output_path):
+                    os.remove(output_path)
+            except OSError:
+                pass
+        finally:
+            if clone is not None:
+                clone.close()
+
+    # =========================================================================
+    # OCR-assisted scanned-text replacement
+    # =========================================================================
+
+    def _release_scan_text_mouse_grab(self):
+        widget = self._scan_text_mouse_grab_widget
+        self._scan_text_mouse_grab_widget = None
+        if widget is not None:
+            try:
+                widget.releaseMouse()
+            except RuntimeError:
+                pass
+
+    def _show_scan_text_progress(self, page_number):
+        self._close_scan_text_progress()
+        progress = QProgressDialog(
+            f"Recognising the selected text on page {int(page_number) + 1}…",
+            "",
+            0,
+            0,
+            self,
+        )
+        progress.setWindowTitle("Preparing Scanned-Text Editor")
+        progress.setWindowModality(Qt.WindowModality.WindowModal)
+        progress.setCancelButton(None)
+        progress.setMinimumDuration(0)
+        progress.setAutoClose(False)
+        progress.setAutoReset(False)
+        self._scan_text_progress = progress
+        progress.show()
+        QApplication.processEvents()
+
+    def _close_scan_text_progress(self):
+        progress = self._scan_text_progress
+        self._scan_text_progress = None
+        if progress is not None:
+            progress.close()
+            progress.deleteLater()
+
+    def _begin_scan_text_edit(self, page_number, pdf_rect):
+        """Render one selected region and recognise its existing text."""
+        if not self.pdf_document or self._scan_text_worker is not None:
+            return
+        try:
+            page = self.pdf_document.load_page(int(page_number))
+            rect = fitz.Rect(pdf_rect)
+            rect.normalize()
+            rect &= page.rect
+            if rect.is_empty or rect.width < 8 or rect.height < 8:
+                self.status_bar.showMessage(
+                    "The selected area is too small for scanned-text editing."
+                )
+                return
+
+            # Roughly 216 DPI gives Tesseract enough detail without creating a
+            # large full-page bitmap. Only the selected rectangle is rendered.
+            matrix = fitz.Matrix(3.0, 3.0)
+            pix = page.get_pixmap(
+                matrix=matrix, clip=rect, colorspace=fitz.csRGB, alpha=False
+            )
+            image_samples = bytes(pix.samples)
+            preview_image = QImage(
+                image_samples,
+                pix.width,
+                pix.height,
+                pix.stride,
+                QImage.Format.Format_RGB888,
+            ).copy()
+
+            from PIL import Image
+
+            pil_image = Image.frombytes(
+                "RGB", (pix.width, pix.height), image_samples
+            )
+            background_rgb = sample_background_rgb(pil_image)
+            self._scan_text_context = {
+                "document_token": id(self.pdf_document),
+                "page_number": int(page_number),
+                "pdf_rect": tuple(rect),
+                "preview_image": preview_image,
+                "background_rgb": background_rgb,
+                "ocr_result_received": False,
+            }
+
+            # Prefer an existing text layer when present. This avoids OCR drift
+            # on already-searchable scans while keeping the same edit workflow.
+            native_text = page.get_textbox(rect).strip()
+            if native_text:
+                self._show_scan_text_dialog(
+                    native_text,
+                    0.0,
+                    recognition_note="Existing PDF text layer used",
+                )
+                return
+
+            status = configure_tesseract()
+            if not status.available or status.executable is None:
+                QMessageBox.warning(
+                    self,
+                    "OCR Unavailable",
+                    status.detail
+                    + "\n\nThe replacement editor will still open so you can "
+                    "type the new text manually.",
+                )
+                self._show_scan_text_dialog(
+                    "",
+                    0.0,
+                    recognition_note="OCR unavailable - enter text manually",
+                )
+                return
+
+            worker = ScanTextOCRWorker(
+                image_size=(pix.width, pix.height),
+                image_samples=image_samples,
+                tesseract_exe=str(status.executable),
+                language="eng",
+                parent=self,
+            )
+            self._scan_text_worker = worker
+            worker.completed.connect(self._scan_text_ocr_completed)
+            worker.error.connect(self._scan_text_ocr_failed)
+            worker.finished.connect(self._scan_text_ocr_finished)
+            self.status_bar.showMessage(
+                f"Recognising selected text on page {int(page_number) + 1}..."
+            )
+            self._show_scan_text_progress(page_number)
+            worker.start()
+        except Exception as exc:
+            self._close_scan_text_progress()
+            self._scan_text_context = None
+            QMessageBox.critical(
+                self,
+                "Scanned Text Error",
+                f"The selected region could not be prepared.\n\n"
+                f"{type(exc).__name__}: {exc}",
+            )
+
+    def _scan_text_ocr_completed(self, recognised_text, confidence):
+        if self._scan_text_context is not None:
+            self._scan_text_context["ocr_result_received"] = True
+        self._close_scan_text_progress()
+        self._show_scan_text_dialog(str(recognised_text), float(confidence))
+
+    def _scan_text_ocr_failed(self, detail):
+        if self._scan_text_context is not None:
+            self._scan_text_context["ocr_result_received"] = True
+        self._close_scan_text_progress()
+        QMessageBox.warning(
+            self,
+            "OCR Could Not Read This Region",
+            "Tesseract could not recognise the selected area. You can still "
+            "type replacement text manually.\n\n" + str(detail),
+        )
+        self._show_scan_text_dialog(
+            "",
+            0.0,
+            recognition_note="OCR failed - enter text manually",
+        )
+
+    def _scan_text_ocr_finished(self):
+        worker = self.sender()
+        if worker is self._scan_text_worker:
+            self._scan_text_worker = None
+        if worker is not None:
+            worker.deleteLater()
+
+        # Let any queued completed/error signal run before deciding that the
+        # thread ended without a result. This prevents a signal-order race on
+        # fast Windows machines.
+        QTimer.singleShot(0, self._scan_text_missing_result_fallback)
+
+    def _scan_text_missing_result_fallback(self):
+        context = self._scan_text_context
+        if context and not context.get("ocr_result_received", False):
+            self._close_scan_text_progress()
+            context["ocr_result_received"] = True
+            QMessageBox.warning(
+                self,
+                "OCR Ended Unexpectedly",
+                "The OCR task ended without returning a result. The editor will "
+                "open so you can enter the replacement manually.",
+            )
+            self._show_scan_text_dialog(
+                "",
+                0.0,
+                recognition_note="OCR ended unexpectedly - enter text manually",
+            )
+
+    def _show_scan_text_dialog(
+        self, recognised_text, confidence, *, recognition_note=""
+    ):
+        self._close_scan_text_progress()
+        context = self._scan_text_context
+        if (
+            not context
+            or not self.pdf_document
+            or context.get("document_token") != id(self.pdf_document)
+        ):
+            self._scan_text_context = None
+            return
+
+        dialog = ScanTextEditDialog(
+            page_number=context["page_number"],
+            pdf_rect=context["pdf_rect"],
+            preview_image=context["preview_image"],
+            recognised_text=str(recognised_text or ""),
+            ocr_confidence=float(confidence or 0.0),
+            background_rgb=context["background_rgb"],
+            recognition_note=recognition_note,
+            parent=self,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            self._scan_text_context = None
+            self.status_bar.showMessage("Scanned-text replacement cancelled.")
+            return
+
+        plan = dialog.replacement_plan()
+        if plan.mode == SCAN_MODE_REDACT:
+            reply = QMessageBox.warning(
+                self,
+                "Apply Permanent Replacement",
+                "Permanent mode removes page text, line art, and image pixels "
+                "inside the selected rectangle before inserting the replacement.\n\n"
+                "It cannot be undone in the current editing session. Saving will "
+                "require a new filename so the original PDF remains preserved.\n\n"
+                "Continue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if reply != QMessageBox.StandardButton.Yes:
+                self._scan_text_context = None
+                self.status_bar.showMessage("Permanent replacement cancelled.")
+                return
+
+        try:
+            result = apply_scan_text_replacement(self.pdf_document, plan)
+            if result["mode"] == SCAN_MODE_OVERLAY:
+                self._undo_stack.push(
+                    Command(
+                        kind="scan_text_overlay",
+                        redo_data={"plan": asdict(plan)},
+                        undo_data={
+                            "page": int(result["page_number"]),
+                            "annotation_xref": int(result["annotation_xref"]),
+                        },
+                    )
+                )
+                self._mark_modified()
+                message = (
+                    "Reversible text replacement added. It can be removed from "
+                    "the Annotations panel."
+                )
+            else:
+                self._requires_full_rewrite = True
+                self._mark_modified()
+                message = (
+                    "Permanent replacement applied. Use Save As to write a clean "
+                    "edited copy while preserving the original."
+                )
+
+            page_number = int(result["page_number"])
+            self._scan_text_context = None
+            self.selection_start_point = None
+            self.selection_end_point = None
+            self.current_selection_page = -1
+            self.render_page_content(page_number, self.page_widgets[page_number])
+            self.refresh_annotations_panel()
+            self._update_undo_redo_labels()
+            self.status_bar.showMessage(message)
+        except Exception as exc:
+            self._scan_text_context = None
+            QMessageBox.critical(
+                self,
+                "Replacement Failed",
+                "The document was not saved.\n\n"
+                f"{type(exc).__name__}: {exc}",
+            )
 
     # =========================================================================
     # Mouse interaction on pages
@@ -1267,6 +2879,10 @@ class PDFReader(PDFReaderUI):
             pass  # allow out-of-bounds for annotation placement check below
 
         btn = event.button()
+
+        if self._form_design_mode:
+            self._handle_form_designer_press(event, page_widget, page_num, px, py)
+            return
 
         # ── Sticky note (📌) ─────────────────────────────────────────────
         if btn == Qt.MouseButton.LeftButton and self.active_tool == TOOL_ANNOTATE:
@@ -1314,12 +2930,22 @@ class PDFReader(PDFReaderUI):
             self._erase_nearest_markup(page_num, px, py, page_widget)
             return
 
-        # ── Redaction drag start ─────────────────────────────────────────
-        if btn == Qt.MouseButton.LeftButton and self.active_tool == TOOL_REDACT:
-            self.is_selecting_text       = True
-            self.selection_start_point   = event.position().toPoint()
-            self.selection_end_point     = event.position().toPoint()
-            self.current_selection_page  = page_num
+        # ── Region-selection tools ──────────────────────────────────────
+        if (
+            btn == Qt.MouseButton.LeftButton
+            and self.active_tool in (TOOL_REDACT, TOOL_SCAN_TEXT)
+        ):
+            if self.active_tool == TOOL_SCAN_TEXT:
+                self._release_scan_text_mouse_grab()
+                try:
+                    page_widget.grabMouse()
+                    self._scan_text_mouse_grab_widget = page_widget
+                except RuntimeError:
+                    self._scan_text_mouse_grab_widget = None
+            self.is_selecting_text = True
+            self.selection_start_point = event.position().toPoint()
+            self.selection_end_point = event.position().toPoint()
+            self.current_selection_page = page_num
             self.update_view()
             return
 
@@ -1335,6 +2961,10 @@ class PDFReader(PDFReaderUI):
         page_num = page_widget.property("page_num")
         px, py   = self._pixel_coords(event, page_widget)
         if px is None:
+            return
+
+        if self._form_design_mode:
+            self._handle_form_designer_move(event, page_widget, page_num, px, py)
             return
 
         if (self._freehand_drawing and
@@ -1354,6 +2984,10 @@ class PDFReader(PDFReaderUI):
     def _handle_page_mouse_release(self, event, page_widget):
         page_num = page_widget.property("page_num")
         px, py   = self._pixel_coords(event, page_widget)
+
+        if self._form_design_mode:
+            self._handle_form_designer_release(event, page_widget, page_num, px, py)
+            return
 
         if (self._freehand_drawing and
                 self.active_tool == TOOL_FREEHAND and
@@ -1388,6 +3022,31 @@ class PDFReader(PDFReaderUI):
             self._freehand_points = []
             self._freehand_page   = -1
             self.render_page_content(page_num, page_widget)
+            return
+
+        if (self.is_selecting_text and
+                self.active_tool == TOOL_SCAN_TEXT and
+                event.button() == Qt.MouseButton.LeftButton):
+            self._release_scan_text_mouse_grab()
+            self.is_selecting_text = False
+            self.selection_end_point = event.position().toPoint()
+            pdf_rect = None
+            if (self.selection_start_point and
+                    abs(self.selection_start_point.x() - self.selection_end_point.x()) > 5 and
+                    abs(self.selection_start_point.y() - self.selection_end_point.y()) > 5):
+                pdf_rect = self._widget_coords_to_pdf_rect(
+                    page_widget, self.selection_start_point, self.selection_end_point
+                )
+            self.selection_start_point = None
+            self.selection_end_point = None
+            self.current_selection_page = -1
+            self.update_view()
+            if pdf_rect:
+                self._begin_scan_text_edit(page_num, pdf_rect)
+            else:
+                self.status_bar.showMessage(
+                    "Drag a rectangle around the scanned text you want to replace."
+                )
             return
 
         if (self.is_selecting_text and
@@ -1912,9 +3571,10 @@ class PDFReader(PDFReaderUI):
             xref = data.get("annot_xref")
             if xref and self.pdf_document:
                 p = self.pdf_document.load_page(page)
-                for annot in p.annots():
+                for annot in p.annots() or []:
                     if annot.xref == xref:
                         p.delete_annot(annot)
+                        self._mark_modified()
                         break
 
         # Re-render and refresh panel
@@ -2216,39 +3876,90 @@ class PDFReader(PDFReaderUI):
         dlg.exec()
 
     def closeEvent(self, event):
-        """Auto-save form data and persist window geometry on close."""
+        """Protect unsaved form and annotation changes before closing."""
         self._autosave_form_data()
+        if not self._confirm_save_changes("close PDF Studio"):
+            event.ignore()
+            return
+
         self.settings.setValue("window_geometry", self.saveGeometry())
         self.settings.setValue("window_state", self.saveState())
         self._save_sidebar_state()
-        self.settings.setValue("prefs/zoom_level",   self.zoom_level)
-        self.settings.setValue("prefs/view_mode",    self.view_mode)
-        self.settings.setValue("prefs/dark_mode",    self.dark_mode)
+        self.settings.setValue("prefs/zoom_level", self.zoom_level)
+        self.settings.setValue("prefs/view_mode", self.view_mode)
+        self.settings.setValue("prefs/dark_mode", self.dark_mode)
         self.settings.setValue("prefs/markup_color", self.markup_color.name())
-        super().closeEvent(event)
+        if (
+            self._form_detection_worker is not None
+            and self._form_detection_worker.isRunning()
+        ):
+            QMessageBox.information(
+                self,
+                "Form Detection Running",
+                "Form detection is still analysing a page. Close PDF Studio "
+                "after the analysis completes.",
+            )
+            event.ignore()
+            return
+        self._form_detection_worker = None
+        if (
+            self._scan_text_worker is not None
+            and self._scan_text_worker.isRunning()
+        ):
+            QMessageBox.information(
+                self,
+                "Scanned-Text OCR Running",
+                "OCR is still analysing a selected region. Close PDF Studio "
+                "after that operation completes.",
+            )
+            event.ignore()
+            return
+        self._scan_text_worker = None
+        if self.pdf_document is not None:
+            try:
+                self.pdf_document.close()
+            except Exception:
+                pass
+            self.pdf_document = None
+        event.accept()
 
     # =========================================================================
     # Save a Copy  (Phase 0 – new safe save option)
     # =========================================================================
 
     def save_a_copy(self):
-        """Save a copy of the current document to a new path without changing
-        the working path (safe alternative to Save As)."""
+        """Save a complete copy without changing the active document path."""
         if not self.pdf_document:
-            return
+            return False
         default = self.pdf_file_path or "copy.pdf"
-        if default:
-            import os as _os
-            base, ext = _os.path.splitext(default)
-            default = base + "_copy" + ext
+        base, ext = os.path.splitext(default)
+        default = base + "_copy" + (ext or ".pdf")
         file_name, _ = QFileDialog.getSaveFileName(
             self, "Save a Copy", default, "PDF Files (*.pdf)")
-        if file_name:
-            try:
-                self.pdf_document.save(file_name, garbage=3, deflate=True)
-                self.status_bar.showMessage(f"Copy saved: {file_name}")
-            except Exception as e:
-                QMessageBox.critical(self, "Save Error", str(e))
+        if not file_name:
+            return False
+        if not file_name.lower().endswith(".pdf"):
+            file_name += ".pdf"
+        if self.pdf_file_path and os.path.abspath(file_name) == os.path.abspath(self.pdf_file_path):
+            QMessageBox.warning(
+                self, "Choose a Different File",
+                "Save a Copy cannot replace the document currently open. "
+                "Choose a different filename.")
+            return False
+        try:
+            self._prepare_document_for_save()
+            self.pdf_document.save(
+                file_name,
+                garbage=4 if self._requires_full_rewrite else 3,
+                clean=bool(self._requires_full_rewrite),
+                deflate=True,
+                encryption=fitz.PDF_ENCRYPT_KEEP,
+            )
+            self.status_bar.showMessage(f"Copy saved: {file_name}")
+            return True
+        except Exception as exc:
+            QMessageBox.critical(self, "Save Copy Error", str(exc))
+            return False
 
     # =========================================================================
     # Undo / Redo  (Phase 0 – annotation & markup; Phase 2 – page ops)
@@ -2274,6 +3985,7 @@ class PDFReader(PDFReaderUI):
         """Apply undo or redo payload for the given command."""
         data = cmd.undo_data if direction == "undo" else cmd.redo_data
         kind = cmd.kind
+        self._mark_modified()
 
         if kind == "annotation_add":
             page_num, item = data["page"], data["item"]
@@ -2309,6 +4021,30 @@ class PDFReader(PDFReaderUI):
                 strokes.append(stroke)
             msg = "Annotation undone." if direction == "undo" else "Annotation redone."
             self._finish_markup_undo(page_num, msg)
+
+        elif kind == "scan_text_overlay":
+            if direction == "undo":
+                page_num = int(data["page"])
+                removed = remove_overlay_replacement(
+                    self.pdf_document,
+                    page_number=page_num,
+                    annotation_xref=int(data["annotation_xref"]),
+                )
+                message = (
+                    "Text replacement undone."
+                    if removed
+                    else "The text replacement was already removed."
+                )
+            else:
+                plan = ScanTextReplacement(**data["plan"])
+                result = apply_scan_text_replacement(self.pdf_document, plan)
+                page_num = int(result["page_number"])
+                cmd.undo_data["page"] = page_num
+                cmd.undo_data["annotation_xref"] = int(
+                    result["annotation_xref"]
+                )
+                message = "Text replacement redone."
+            self._finish_markup_undo(page_num, message)
 
         elif kind == "page_add":
             page_num = data["page"]
@@ -2375,6 +4111,7 @@ class PDFReader(PDFReaderUI):
             "annotation_remove": "Note Erase",
             "markup_add":        "Markup",
             "markup_remove":     "Markup Erase",
+            "scan_text_overlay": "Text Replacement",
             "page_add":          "Insert Page",
             "page_remove":       "Delete Page",
             "page_move":         "Move Page",
@@ -2405,49 +4142,25 @@ class PDFReader(PDFReaderUI):
             self.status_bar.showMessage(f"Select all error: {e}")
 
     # =========================================================================
-    # Form: auto-save & reset  (Phase 2)
+    # Form persistence
     # =========================================================================
 
     def _autosave_form_data(self):
-        """Persist in-memory form field values back into the fitz document."""
-        if not self.pdf_document or not self._form_dirty:
+        """Flush controls into the in-memory document; disk save remains explicit."""
+        if not self.pdf_document:
+            return
+        self._flush_form_controls()
+        if not self._form_dirty:
             return
         import logging
         for page_num, fields in self.form_fields.items():
             for field in fields:
                 try:
                     field.update()
-                except Exception as e:
+                except Exception as exc:
                     logging.warning(
                         "_autosave_form_data: failed updating field on page %d: %s",
-                        page_num, e)
-        self._form_dirty = False
-
-    def reset_form(self):
-        """Reset all form fields on the current page to their default values."""
-        if not self.pdf_document:
-            return
-        pn = self.current_page
-        if pn not in self.form_fields:
-            self.status_bar.showMessage("No form fields on this page.")
-            return
-        reply = QMessageBox.question(
-            self, "Reset Form",
-            f"Reset all form fields on page {pn + 1} to their defaults?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No)
-        if reply != QMessageBox.StandardButton.Yes:
-            return
-        try:
-            page = self.pdf_document.load_page(pn)
-            for widget in page.widgets():
-                widget.field_value = widget.field_value_default or ""
-                widget.update()
-            self.form_fields[pn] = list(page.widgets())
-            self.render_page_content(pn, self.page_widgets[pn])
-            self.status_bar.showMessage(f"Form fields on page {pn + 1} reset.")
-        except Exception as e:
-            self.status_bar.showMessage(f"Reset error: {e}")
+                        page_num, exc)
 
     # =========================================================================
     # Thumbnail double-click  (Phase 2)
