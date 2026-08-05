@@ -32,6 +32,9 @@ comfortably, and the program will remember it next time.
 
 ## Opening a document
 
+When PDF Studio starts, its red startup picture appears for about five seconds.
+This is normal. The main window opens automatically when the picture fades away.
+
 **The easy way:** double-click any PDF file. It will open in PDF Studio.
 
 **From inside the program:** click **Open** on the toolbar (top-left).
@@ -202,6 +205,30 @@ When you are finished with a tool, press the **Esc** key (top-left of the
 keyboard) to put it down.
 
 Remember to click **Save** when you are done.
+
+---
+
+## Turning a PDF page into a picture
+
+This is useful for posters, flyers, or any website that asks for a PNG or JPG
+instead of a PDF.
+
+1. Open the PDF and go to the page you want.
+2. Click **File → Export As → Image Files…**.
+3. Choose **Current page**.
+4. Choose a format:
+   - **PNG** — best default for posters, text, and sharp graphics.
+   - **JPEG** — smaller file, good for photographs.
+   - **WebP** — small modern image for websites.
+   - **TIFF** — high-quality print or archive work.
+   - **BMP** — large, simple Windows bitmap.
+   - **GIF** — limited-colour static image; it is not animated.
+5. Leave the resolution at **300 DPI** for a printable poster, or use **150 DPI**
+   for ordinary screen use.
+6. Click **Export**, choose the filename, and save.
+
+To convert several pages, choose **All pages** or type a page range such as
+`1-3, 6`. PDF Studio creates one numbered picture for each page.
 
 ---
 

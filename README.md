@@ -15,17 +15,17 @@ Released under the **Apache License 2.0**.
 
 | | |
 |---|---|
-| **Version** | `3.2.0-alpha4` |
+| **Version** | `3.2.0-alpha6` |
 | **Status** | Alpha — active development |
 | **Primary platform** | Windows 10 / 11 |
 | **Python** | 3.10+; validated with Python 3.11 |
-| **Automated tests** | 29 passing |
+| **Automated tests** | 45 passing |
 | **OCR engine** | Tesseract, detected automatically without editing PATH |
 
-The current release includes the corrected PDF coordinate-conversion path used
-by scanned-text editing, signatures, stamps, freehand annotations, and
-point-based markup selection. The end-to-end scanned-text replacement workflow
-has been validated on Windows.
+The current release adds a branded, high-DPI-aware startup splash with a
+4.5-second minimum display and a smooth fade into the main window. It retains
+the transactional image-export workflow and the corrected coordinate path used
+by scanned-text editing, signatures, stamps, freehand annotations, and markup.
 
 ---
 
@@ -33,6 +33,7 @@ has been validated on Windows.
 
 ### Read and navigate
 
+- Branded startup splash with a 4.5-second minimum display and smooth fade
 - Single-page and continuous-scroll viewing
 - Fit width, fit page, zoom, rotation, full screen, and dark mode
 - Table of contents, bookmarks, annotations, forms, and page thumbnails
@@ -73,6 +74,9 @@ has been validated on Windows.
 
 - Open Word, Excel, OpenDocument, RTF, and CSV files through Microsoft Office
   or LibreOffice conversion
+- Export PDF pages to PNG, JPEG, WebP, TIFF, BMP, or static GIF
+- Choose current page, all pages, or a discontiguous page range
+- Select image resolution up to 1200 DPI, lossy quality, and transparency where supported
 - Export PDF content to Word with `pdf2docx`
 - Export detected tables to Excel with `tabula-py`
 - Encrypt saved PDFs with AES-256 and configurable permissions
@@ -124,6 +128,15 @@ src\dist\
 
 Using the clean build environment avoids accidental inclusion of unrelated
 packages or a second Qt binding.
+
+### Startup splash
+
+PDF Studio displays `assets/splashscreen.png` immediately at launch. The main
+window is prepared behind it, the artwork remains visible for at least 4.5
+seconds, and then fades out over 350 milliseconds. The startup path uses Qt
+timers rather than `time.sleep()`, so the application does not deliberately
+freeze its event loop. If the splash asset cannot be loaded, PDF Studio falls
+back to a normal launch instead of refusing to start.
 
 ---
 
@@ -240,6 +253,31 @@ Studio verifies the flattened result and does not overwrite the editable source.
 
 ---
 
+### Export PDF pages as images
+
+Choose:
+
+```text
+File → Export As → Image Files (.png, .jpg, .webp, .tiff, .bmp, .gif)…
+```
+
+Then select:
+
+- **All pages**, **Current page**, or a range such as `1-3, 6, 9-10`
+- PNG, JPEG, WebP, TIFF, BMP, or GIF
+- Resolution from 36 to 1200 DPI; 300 DPI is a strong default for posters and printing
+- JPEG/WebP quality
+- Transparent background for PNG, WebP, and TIFF
+
+A single selected page is saved to one chosen image file. Multiple selected
+pages are written as numbered files such as `poster_page_001.png`. GIF export is
+intentionally static: a multi-page PDF produces one GIF per selected page, not
+an animation.
+
+The exporter stages every image before replacing destination files. A failed or
+cancelled multi-page run therefore does not leave a half-exported set or destroy
+pre-existing images.
+
 ## Optional integrations
 
 The core reader, editor, forms, and OCR Python components are installed from
@@ -293,7 +331,7 @@ or:
 Current expected result:
 
 ```text
-29 passed
+45 passed
 ```
 
 The suite covers:
@@ -307,6 +345,10 @@ The suite covers:
 - background sampling and font fitting
 - mouse-selection endpoint handling
 - inverse-matrix point and rectangle conversion
+- strict page-range parsing and discontiguous page selection
+- PNG/JPEG/GIF rendering, DPI dimensions, and transparent PNG output
+- transactional cleanup when a later page fails
+- startup minimum-duration timing and active-screen splash scaling
 
 These automated tests validate the document model and critical conversion paths.
 They do not replace final Windows GUI interaction testing.
@@ -338,7 +380,10 @@ src/
 ├── tesseract_setup.py               Tesseract discovery and validation
 ├── merge_split_dialog.py            Merge and split operations
 ├── extract_pages_dialog.py          Page extraction
-├── export_dialog.py                 Word and Excel export
+├── export_dialog.py                 Word, Excel, and image export
+├── image_export_core.py             Tested page rendering and transactional output
+├── splash_screen.py                 Transparent splash window and fade animation
+├── startup_splash_core.py           Tested timing and screen-fitting rules
 ├── signature_dialog.py              Drawn signature editor
 ├── password_dialog.py               Opening and encryption passwords
 ├── undo_stack.py                    Undo/redo command stack
@@ -353,7 +398,7 @@ Application metadata is centralised at the top of `src/about_dialog.py`:
 
 ```python
 APP_NAME = "PDF Studio"
-APP_VERSION = "3.2.0-alpha4"
+APP_VERSION = "3.2.0-alpha6"
 COMPANY_NAME = "Leon Priest"
 ```
 
@@ -421,6 +466,24 @@ unregister_pdf.bat
 ---
 
 ## Recent changelog
+
+### 3.2.0-alpha6 — branded startup splash
+
+- Added the supplied transparent 750 × 500 PDF Studio splash artwork.
+- Added a 4.5-second minimum display without blocking `time.sleep()`.
+- Added a 350 ms fade before revealing the prepared main window.
+- Added active-screen centring, high-DPI scaling, and source/PyInstaller resource lookup.
+- Added a non-fatal fallback when the cosmetic splash asset is unavailable.
+- Added four startup timing and sizing regression tests.
+
+### 3.2.0-alpha5 — PDF page image export
+
+- Added PNG, JPEG, WebP, TIFF, BMP, and static GIF export.
+- Added current-page, all-page, and discontiguous page-range selection.
+- Added DPI, quality, and supported-transparency controls.
+- Added numbered page filenames for multi-page exports.
+- Added transactional staging and rollback protection.
+- Added 12 image-export regression tests.
 
 ### 3.2.0-alpha4 — PDF coordinate conversion correction
 

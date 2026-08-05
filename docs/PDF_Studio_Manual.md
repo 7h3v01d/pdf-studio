@@ -1,6 +1,6 @@
 # PDF Studio — User Manual
 
-**Version 3.2-alpha4** · Free and open source · Apache License 2.0
+**Version 3.2-alpha6** · Free and open source · Apache License 2.0
 Leon Priest — [github.com/7h3v01d](https://github.com/7h3v01d)
 
 ---
@@ -23,7 +23,7 @@ Leon Priest — [github.com/7h3v01d](https://github.com/7h3v01d)
 14. [Merging, splitting, extracting](#14-merging-splitting-extracting)
 15. [Password protection](#15-password-protection)
 16. [OCR — making scans searchable](#16-ocr--making-scans-searchable)
-17. [Exporting to Word and Excel](#17-exporting-to-word-and-excel)
+17. [Exporting pages and document content](#17-exporting-pages-and-document-content)
 18. [Saving and printing](#18-saving-and-printing)
 19. [File associations (Windows)](#19-file-associations-windows)
 20. [Keyboard shortcuts](#20-keyboard-shortcuts)
@@ -52,7 +52,7 @@ Apache License 2.0.
 - AES-256 password protection
 - OCR scanned documents to make them searchable
 - Open Word and Excel documents
-- Export PDFs to Word and Excel
+- Export PDF pages to images, or PDF content to Word and Excel
 - Two accessibility-focused themes with an app-wide text-size control
 
 ---
@@ -66,7 +66,10 @@ Apache License 2.0.
 
 ### Option A — Run the built executable
 
-Double-click **`PDF Studio.exe`**. Nothing to install.
+Double-click **`PDF Studio.exe`**. Nothing to install. A branded startup image
+appears immediately, remains visible for at least 4.5 seconds while the main
+window is prepared, then fades away. The splash is cosmetic: if its image cannot
+be loaded, PDF Studio continues with a normal launch.
 
 ### Option B — Run from source
 
@@ -86,6 +89,7 @@ and will tell you what is missing if you try to use one.
 | Feature | Python packages | External programs |
 |---|---|---|
 | Open Word / Excel | *(none)* | **Microsoft Office** (best fidelity) or **LibreOffice** |
+| Export pages to images | *(included)* | — |
 | Export to Word | `pdf2docx` | — |
 | Export to Excel | `tabula-py`, `openpyxl`, `pandas` | **Java** |
 | OCR | `pytesseract`, `Pillow` | **Tesseract-OCR** (auto-detected; no PATH edit) |
@@ -529,21 +533,47 @@ required because PDF Studio renders pages directly through PyMuPDF.
 
 ---
 
-## 17. Exporting to Word and Excel
+## 17. Exporting pages and document content
 
-**File → Export As →**
+Choose **File → Export As**.
 
-**Microsoft Word (.docx)** — preserves layout, text, images, and columns via
-`pdf2docx`. You can select a page range.
+### Image files
 
-**Microsoft Excel (.xlsx)** — extracts *tables* into styled worksheets (headers,
+**Image Files (.png, .jpg, .webp, .tiff, .bmp, .gif)…** renders the visible
+PDF page exactly as an image. This is ideal for posters, flyers, social-media
+artwork, previews, and attaching a PDF page where an image is required.
+
+1. Choose **All pages**, **Current page**, or enter a range such as
+   `1-3, 6, 9-10`.
+2. Choose PNG, JPEG, WebP, TIFF, BMP, or GIF.
+3. Choose the resolution. **300 DPI** is a strong default for posters and
+   printing; **150 DPI** is usually enough for screen use.
+4. For JPEG and WebP, choose the quality. For PNG, WebP, and TIFF, you may keep
+   a transparent page background where the PDF permits it.
+5. Click **Export**.
+
+A single page is saved to one image file. Multiple pages are written as numbered
+files such as `poster_page_001.png`. GIF export is static: multiple pages become
+separate GIF files rather than an animation.
+
+PDF Studio stages all selected pages before replacing destination files. If a
+page fails or the run is cancelled, it does not leave a half-created export set.
+
+### Microsoft Word
+
+**Microsoft Word (.docx)** preserves layout, text, images, and columns via
+`pdf2docx`. You can select a continuous page range.
+
+### Microsoft Excel
+
+**Microsoft Excel (.xlsx)** extracts *tables* into styled worksheets (headers,
 alternating row shading, frozen panes) via `tabula-py`. Requires **Java**.
 
-Both run in the background with a progress bar.
+All export types run in the background with a progress bar.
 
-> Export quality depends on the source. A clean, text-based PDF converts well; a
-> scanned or heavily designed one may need cleanup. Excel export finds tables —
-> it is not a general PDF-to-spreadsheet converter.
+> Word/Excel quality depends on the source. A clean, text-based PDF converts
+> well; a scanned or heavily designed one may need cleanup. Excel export finds
+> tables — it is not a general PDF-to-spreadsheet converter.
 
 ---
 

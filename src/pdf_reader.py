@@ -3,7 +3,7 @@ pdf_reader.py
 -------------
 Application entry point.
 
-Free, no-strings PDF viewer/editor. Launches straight into the main window —
+Free, no-strings PDF viewer/editor. Launches through a branded splash screen —
 no license check, no trial, no activation.
 
 Command line:
@@ -18,6 +18,8 @@ Command line:
 
 import os
 import sys
+import time
+import traceback
 
 
 def _file_arg(argv):
@@ -50,22 +52,75 @@ def _handle_registration(argv) -> bool:
     return True
 
 
-if __name__ == "__main__":
-    if _handle_registration(sys.argv):
-        sys.exit(0)
+def main(argv=None) -> int:
+    argv = list(sys.argv if argv is None else argv)
+    if _handle_registration(argv):
+        return 0
 
-    from PyQt6.QtWidgets import QApplication
+    from PyQt6.QtCore import QTimer
+    from PyQt6.QtWidgets import QApplication, QMessageBox
+
+    from about_dialog import APP_NAME, COMPANY_NAME
     from pdf_reader_app import PDFReader
+    from splash_screen import PDFStudioSplash
+    from startup_splash_core import MIN_SPLASH_MS, remaining_display_ms
 
-    app = QApplication(sys.argv)
+    app = QApplication(argv)
+    app.setApplicationName(APP_NAME)
+    app.setOrganizationName(COMPANY_NAME)
     QApplication.setQuitOnLastWindowClosed(True)
 
-    reader = PDFReader()
-    reader.show()
+    splash = None
+    started_at = time.monotonic()
+    try:
+        splash = PDFStudioSplash()
+        splash.show()
+        # Force the first paint before the heavier main-window construction.
+        app.processEvents()
+    except Exception:
+        # A cosmetic resource failure must never prevent PDF Studio launching.
+        traceback.print_exc()
+        splash = None
 
-    path = _file_arg(sys.argv)
-    if path:
-        # _open_pdf_path also routes Word/Excel files through conversion.
-        reader._open_pdf_path(path)
+    try:
+        reader = PDFReader()
+        # Give the already-visible splash another repaint opportunity after
+        # the main window has finished constructing.
+        app.processEvents()
+    except Exception as exc:
+        if splash is not None:
+            splash.close()
+            app.processEvents()
+        traceback.print_exc()
+        QMessageBox.critical(
+            None,
+            f"{APP_NAME} startup failed",
+            "PDF Studio could not finish starting.\n\n"
+            f"{type(exc).__name__}: {exc}",
+        )
+        return 1
 
-    sys.exit(app.exec())
+    path = _file_arg(argv)
+
+    def _show_main_window() -> None:
+        reader.show()
+        reader.raise_()
+        reader.activateWindow()
+        if path:
+            # Open command-line / file-association documents only after the
+            # splash has gone, so password prompts and errors cannot appear
+            # behind an always-on-top startup window.
+            QTimer.singleShot(0, lambda: reader._open_pdf_path(path))
+
+    if splash is None:
+        _show_main_window()
+    else:
+        elapsed_ms = (time.monotonic() - started_at) * 1000.0
+        delay_ms = remaining_display_ms(elapsed_ms, MIN_SPLASH_MS)
+        QTimer.singleShot(delay_ms, lambda: splash.fade_out(_show_main_window))
+
+    return app.exec()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

@@ -507,6 +507,7 @@ class PDFReader(PDFReaderUI):
             self._act_edit_scan_text,
             self._act_password,
             self._act_ocr, self._act_export_docx, self._act_export_xlsx,
+            self._act_export_images,
             self._act_save_copy, self._act_reset_form, self._act_reset_all_forms,
             self._act_flatten_form, self._act_form_designer,
             self._act_detect_form_fields, self._act_form_properties,
@@ -3918,9 +3919,7 @@ class PDFReader(PDFReaderUI):
             total_pages=self.total_pages,
             current_page=self.current_page,
             parent=self)
-        # Pre-select format
-        if fmt == "xlsx":
-            dlg._rb_xlsx.setChecked(True)
+        dlg.select_format(fmt)
         dlg.exec()
 
     def closeEvent(self, event):

@@ -158,6 +158,9 @@ def build():
 
     # 2. Opening
     s.append(H1("Opening a document"))
+    s.append(P("When PDF Studio starts, its red startup picture appears for "
+               "about five seconds. This is normal. The main window opens "
+               "automatically when the picture fades away."))
     s.append(P("<b>The easy way:</b> double-click any PDF file. It will open in "
                "PDF Studio."))
     s.append(P("<b>From inside the program:</b> click <b>Open</b> on the "
@@ -311,7 +314,24 @@ def build():
                  "(top-left of the keyboard) to put it down."))
     s.append(P("Remember to click <b>Save</b> when you are done."))
 
-    # 8. Save / print
+    # 8. PDF page to image
+    s.append(H1("Turning a PDF page into a picture"))
+    s.append(P("This is useful for posters, flyers, or any website that asks "
+               "for a PNG or JPG instead of a PDF."))
+    s.append(STEP(1, "Open the PDF and go to the page you want."))
+    s.append(STEP(2, "Click <b>File &gt; Export As &gt; Image Files...</b>."))
+    s.append(STEP(3, "Choose <b>Current page</b>."))
+    s.append(STEP(4, "Choose the picture type: <b>PNG</b> is the best default "
+                     "for posters and sharp text; <b>JPEG</b> is good for photos; "
+                     "WebP, TIFF, BMP, and static GIF are also available."))
+    s.append(STEP(5, "Leave the resolution at <b>300 DPI</b> for a printable "
+                     "poster, or use <b>150 DPI</b> for ordinary screen use."))
+    s.append(STEP(6, "Click <b>Export</b>, choose the filename, and save."))
+    s.append(TIP("To convert several pages, choose <b>All pages</b> or type a "
+                 "range such as <b>1-3, 6</b>. PDF Studio creates one numbered "
+                 "picture for each page. GIF files are static, not animated."))
+
+    # 9. Save / print
     s.append(H1("Saving and printing"))
     s.append(TWOCOL([
         ("Save your changes", "Click <b>Save</b>, or press <b>Ctrl + S</b>"),
@@ -327,7 +347,7 @@ def build():
     s.append(P("If the title bar at the top shows a <b>*</b>, you have unsaved "
                "changes."))
 
-    # 9. Troubleshooting
+    # 10. Troubleshooting
     s.append(H1("If something goes wrong"))
     s.append(H2("I made a mistake."))
     s.append(P("Press <b>Ctrl + Z</b> to undo. You can press it several times "
@@ -347,7 +367,7 @@ def build():
                "open, the computer may need Microsoft Word or LibreOffice "
                "installed. Ask Leon."))
 
-    # 10. Keys
+    # 11. Keys
     s.append(H1("The most useful keys"))
     s.append(TWOCOL([
         ("<b>Ctrl + S</b>", "Save"),

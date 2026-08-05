@@ -489,10 +489,15 @@ class PDFReaderUI(QMainWindow):
         # (inserted into File menu after it's built — we patch it below)
         self._act_export_docx = QAction("Microsoft &Word (.docx)…",  self)
         self._act_export_xlsx = QAction("Microsoft &Excel (.xlsx)…", self)
+        self._act_export_images = QAction(
+            "&Image Files (.png, .jpg, .webp, .tiff, .bmp, .gif)…", self
+        )
 
         # Populate Export As submenu (actions declared above in Tools block)
         self._export_menu.addAction(self._act_export_docx)
         self._export_menu.addAction(self._act_export_xlsx)
+        self._export_menu.addSeparator()
+        self._export_menu.addAction(self._act_export_images)
 
         # ── Help ─────────────────────────────────────────────────────────
         help_menu = mb.addMenu("&Help")
@@ -818,6 +823,8 @@ class PDFReaderUI(QMainWindow):
             lambda: self._show_export("docx"))
         self._act_export_xlsx.triggered.connect(
             lambda: self._show_export("xlsx"))
+        self._act_export_images.triggered.connect(
+            lambda: self._show_export("image"))
 
         # Forms panel
         self.forms_panel.jump_to_field.connect(self.jump_to_form_field)
@@ -1314,6 +1321,7 @@ class PDFReaderUI(QMainWindow):
             self._act_edit_scan_text,
             self._act_password,
             self._act_ocr, self._act_export_docx, self._act_export_xlsx,
+            self._act_export_images,
             # legacy compat
             self._act_save_copy, self._act_reset_form, self._act_reset_all_forms,
             self._act_flatten_form, self._act_form_designer,

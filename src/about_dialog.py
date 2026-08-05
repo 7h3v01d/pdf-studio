@@ -13,7 +13,7 @@ from PyQt6.QtCore import Qt, QSize, QRect
 # ── App metadata — SINGLE SOURCE OF TRUTH ────────────────────────────────────
 # Change APP_NAME here and the whole app (title bar, About box, menus) follows.
 APP_NAME      = "PDF Studio"
-APP_VERSION   = "3.2.0-alpha4"
+APP_VERSION   = "3.2.0-alpha6"
 COMPANY_NAME  = "Leon Priest"
 LEAD_DEV      = "Leon Priest · github.com/7h3v01d"
 DESCRIPTION = (

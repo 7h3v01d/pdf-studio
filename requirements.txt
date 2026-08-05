@@ -2,7 +2,7 @@
 PyMuPDF>=1.23.0
 PyQt6>=6.5.0
 
-# OCR support bundled into PDF Studio.
+# OCR and PDF-page image export support bundled into PDF Studio.
 # The separate Tesseract OCR application is auto-detected at runtime and does
 # not need to be added to the Windows PATH.
 pytesseract>=0.3.10
