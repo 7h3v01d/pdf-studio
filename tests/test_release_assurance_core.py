@@ -166,3 +166,43 @@ def test_runtime_assets_are_separate_from_documentation_images():
 def test_release_manifest_generator_excludes_package_manifest_to_avoid_hash_cycle():
     generator = load_tool("generate_release_manifest")
     assert "PACKAGE_MANIFEST.json" in generator.EXCLUDED_NAMES
+
+
+
+def test_windows_batch_scripts_do_not_require_py_launcher():
+    import re
+
+    forbidden = re.compile(r"(?im)^\s*(?:where\s+py\b|py(?:\.exe)?\s+-3\.11\b)")
+    for path in ROOT.glob("*.bat"):
+        source = path.read_text(encoding="utf-8", errors="replace")
+        assert not forbidden.search(source), f"{path.name} still requires the py launcher"
+
+
+def test_python311_resolver_is_shared_by_setup_build_and_registration_scripts():
+    resolver = ROOT / "tools" / "resolve_python311.bat"
+    source = resolver.read_text(encoding="utf-8", errors="replace")
+    for token in (
+        "PDF_STUDIO_PYTHON",
+        ".venv\\Scripts\\python.exe",
+        "where python.exe",
+        "Python311\\python.exe",
+        "sys.version_info[:2] == (3, 11)",
+    ):
+        assert token in source
+
+    for script_name in (
+        "setup.bat",
+        "build_clean.bat",
+        "build_release.bat",
+        "register_pdf.bat",
+        "unregister_pdf.bat",
+    ):
+        script = (ROOT / script_name).read_text(encoding="utf-8", errors="replace")
+        assert "tools\\resolve_python311.bat" in script
+        assert "PDF_STUDIO_PYTHON_EXE" in script
+
+
+def test_readme_states_that_windows_py_launcher_is_optional():
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "optional Windows `py` launcher is **not** required" in readme
+    assert "PDF_STUDIO_PYTHON" in readme
