@@ -1,4 +1,4 @@
-# PDF Studio
+![PDF Studio](docs/images/banner.png)
 
 **A Windows-first PDF reader and editor built with Python, PyQt6, and PyMuPDF.**
 
@@ -9,7 +9,7 @@ scanned pages.
 Created by **Leon Priest** — [github.com/7h3v01d](https://github.com/7h3v01d)  
 Application source released under **Apache-2.0**; bundled dependency obligations remain under review.
 
-![PDF Studio application window](assets/screenshot.png)
+![PDF Studio application window](docs/images/screenshot.png)
 
 ## Current release
 
