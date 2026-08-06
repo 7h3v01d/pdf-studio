@@ -1,4 +1,4 @@
-![PDF Studio](docs/images/banner.png)
+# PDF Studio
 
 **A Windows-first PDF reader and editor built with Python, PyQt6, and PyMuPDF.**
 
@@ -9,25 +9,26 @@ scanned pages.
 Created by **Leon Priest** — [github.com/7h3v01d](https://github.com/7h3v01d)  
 Application source released under **Apache-2.0**; bundled dependency obligations remain under review.
 
-![PDF Studio application window](docs/images/screenshot.png)
+![PDF Studio application window](assets/screenshot.png)
 
 ## Current release
 
 | | |
 |---|---|
-| **Version** | `3.2.0-alpha10` |
+| **Version** | `3.2.0-alpha12` |
 | **Status** | Internal alpha — integrity hardening in progress |
 | **Primary platform** | Windows 10 / 11 |
 | **Python** | 3.11 for the supported build workflow |
-| **Automated tests** | 103 passing in the source package |
+| **Automated tests** | 117 passing in the source package |
 | **OCR engine** | Tesseract, detected automatically without editing PATH |
 
-The current release closes the residual controller-integrity defects found after
-the first release-assurance pass. It corrects real PyMuPDF page-move semantics,
-requires an explicit decision for pending redactions during Save As, completes
-document-open rollback, prevents imported Office sessions from saving into
-temporary conversion caches, and commits the PDF plus its JSON sidecars as one
-rollback-capable file transaction.
+The current release closes the last confidentiality gap in save recovery. Original
+transaction backups now live under PDF Studio's controlled local application-data
+recovery area rather than beside user documents. A successful save cannot silently
+leave pre-redaction copies behind: cleanup is verified, residual copies trigger a
+prominent privacy warning, and the user can retry deletion or open the exact folder.
+Office imports now use full-UUID, marker-owned workspaces under a dedicated cache
+root, so filename resemblance alone can never establish deletion ownership.
 
 > **Distribution status:** this build remains an internal alpha. Public and family
 > binary distribution is deliberately blocked by `release/release_policy.json`
@@ -433,7 +434,7 @@ Application metadata is centralised in `src/app_metadata.py`:
 
 ```python
 APP_NAME = "PDF Studio"
-APP_VERSION = "3.2.0-alpha10"
+APP_VERSION = "3.2.0-alpha12"
 COMPANY_NAME = "Leon Priest"
 ```
 
@@ -522,6 +523,28 @@ folder and rotate automatically so they cannot grow without bound.
 
 
 ## Recent changelog
+
+### 3.2.0-alpha12 — confidential recovery V
+
+- Moved transaction recovery data from document folders into PDF Studio's controlled local application-data recovery directory.
+- Added `SaveBundleRecoveryCleanupIncomplete` for saves that commit successfully but leave original recovery copies behind.
+- Added verified cleanup retries and a prominent privacy warning with **Retry Deletion** and **Open Recovery Folder** actions.
+- Prevented secure-redaction completion claims while pre-redaction recovery copies still exist.
+- Replaced filename-based Office-import ownership with full-UUID workspaces, ownership markers, and dedicated `%TEMP%\PDF Studio\Imports` storage.
+- Made stale import cleanup require marker-proven ownership and conservative age checks.
+- Added confidentiality, controlled-recovery-root, retry-cleanup, and import-ownership regressions; the suite now reports 117 passing tests.
+
+### 3.2.0-alpha12 — recovery integrity IV
+
+- Replaced best-effort save rollback with an explicit recovery protocol.
+- Preserved untouched original destination copies until rollback is proven complete.
+- Added `SaveBundleRollbackIncomplete` with the original commit error, every failed restoration, and a durable recovery-directory path.
+- Added human-readable and JSON recovery manifests beside preserved backups.
+- Changed the Save Error UI so it never claims destination preservation after an incomplete rollback.
+- Made rollback attempt every committed destination even after an earlier restoration fails.
+- Removed partial PDF Studio Office-import caches after failed conversion or validation.
+- Added conservative startup cleanup for owned `pdfstudio_import_*.pdf` caches older than seven days.
+- Added compounded commit/rollback fault injection and cache-hygiene regressions; the suite now reports 112 passing tests.
 
 ### 3.2.0-alpha10 — controller integrity III
 
