@@ -1,4 +1,4 @@
-# PDF Studio 3.2.0-alpha10 — Known Issues and Release Gates
+# PDF Studio 3.2.0-alpha12 — Known Issues and Release Gates
 
 This build is an **internal development alpha**. It is not yet approved for
 family distribution, public testing, or a GitHub binary release.
@@ -53,6 +53,29 @@ family distribution, public testing, or a GitHub binary release.
   rollback-capable save bundle. Sidecar failures preserve prior destinations and
   keep the document dirty instead of being overwritten by a false `Saved` state.
 
+## Corrected in alpha11 - recovery integrity IV
+
+- Save-bundle rollback failures are no longer suppressed. A compounded commit
+  and restoration failure raises a dedicated `SaveBundleRollbackIncomplete`.
+- Original destination backups remain in a durable recovery directory until the
+  transaction commits or every rollback action succeeds.
+- Incomplete rollback records the original commit failure, each failed restore,
+  destination paths, recovery-copy paths, and human-readable instructions.
+- The GUI never claims that existing destinations were preserved when rollback
+  is incomplete; it shows the recovery path and keeps the document dirty.
+- Failed Office conversions remove partial owned temporary PDFs. Startup removes
+  only conservatively named PDF Studio import caches older than seven days.
+
+
+## Corrected in alpha12 - confidential recovery V
+
+- Successful saves no longer suppress failure to remove original transaction backups.
+- Residual recovery copies raise a dedicated committed-but-cleanup-incomplete result, are shown prominently to the user, and can be retried or opened directly.
+- Recovery transactions are stored under PDF Studio's local application-data recovery directory rather than beside potentially synchronised documents.
+- Office-import caches now live in full-UUID, marker-owned workspaces under a dedicated temp root; filename resemblance alone is never treated as ownership.
+- Stale-cache cleanup requires a valid ownership marker and removes the complete workspace only after the configured age threshold.
+
+
 ## Remaining release gates
 
 1. Add packaged-GUI integration tests for real close prompts, worker cancellation,
@@ -65,4 +88,4 @@ family distribution, public testing, or a GitHub binary release.
 6. Raise coverage specifically across the real PyQt controller and packaged startup path; the current suite is much stronger but still core-heavy.
 7. Add code signing and installer provenance before a public download is labelled release-ready.
 
-See the adversarial review and the alpha7 through alpha10 changelogs for remediation history.
+See the adversarial review and the alpha7 through alpha12 changelogs for remediation history.

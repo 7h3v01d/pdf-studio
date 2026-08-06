@@ -32,6 +32,9 @@ REQUIRED_FILES = (
 REQUIRED_RUNTIME_LOCK_NAMES = {
     "pymupdf", "pyqt6", "pyqt6-qt6", "pyqt6-sip", "pillow", "pytesseract"
 }
+
+RUNTIME_ASSET_FILES = {"assets/splashscreen.png"}
+
 ALLOWED_PUBLIC_STRATEGIES = {
     "agpl-gpl-compliant-source-distribution",
     "commercial-licenses",
@@ -163,6 +166,27 @@ def run(public_release: bool, require_lock: bool) -> list[str]:
                     failures.append("clean-machine results are missing artifact_sha256")
             except Exception as exc:
                 failures.append(f"Invalid clean-machine results: {exc}")
+
+    assets_dir = ROOT / "assets"
+    actual_assets = {
+        path.relative_to(ROOT).as_posix()
+        for path in assets_dir.rglob("*")
+        if path.is_file()
+    } if assets_dir.is_dir() else set()
+    unexpected_assets = sorted(actual_assets - RUNTIME_ASSET_FILES)
+    missing_assets = sorted(RUNTIME_ASSET_FILES - actual_assets)
+    for relative in unexpected_assets:
+        failures.append(
+            f"Documentation or non-runtime file is stored in assets/: {relative}; "
+            "move documentation artwork to docs/images/"
+        )
+    for relative in missing_assets:
+        failures.append(f"Missing required runtime asset: {relative}")
+
+    readme_text = (ROOT / "README.md").read_text(encoding="utf-8", errors="replace")
+    for relative in ("docs/images/banner.png", "docs/images/screenshot.png"):
+        if relative not in readme_text:
+            failures.append(f"README.md does not reference documentation image {relative}")
 
     forbidden_dirs = {".pytest_cache", "__pycache__"}
     for path in ROOT.rglob("*"):

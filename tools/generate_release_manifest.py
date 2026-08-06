@@ -17,7 +17,7 @@ EXCLUDED_PARTS = {
     ".git", ".venv", ".buildenv", ".pytest_cache", "__pycache__",
     "build", "dist", "wheelhouse",
 }
-EXCLUDED_NAMES = {"build_manifest.json", "wheel_manifest.json"}
+EXCLUDED_NAMES = {"build_manifest.json", "wheel_manifest.json", "PACKAGE_MANIFEST.json"}
 
 
 def app_version() -> str:

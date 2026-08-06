@@ -15,6 +15,14 @@ provided template.
 - [ ] `release/artifact_manifest.json` records the final executable SHA-256.
 - [ ] The exact source archive, locks, wheel manifest, and notices are archived.
 
+## Recovery-integrity validation
+
+- [ ] Fault-inject a late sidecar commit failure and confirm complete rollback reports restored destinations.
+- [ ] Fault-inject both a late commit failure and an earlier destination-restoration failure.
+- [ ] Confirm PDF Studio shows **Save Rollback Incomplete**, preserves a recovery directory, and records `recovery_manifest.json`.
+- [ ] Confirm no success or preservation message is shown while rollback remains incomplete.
+- [ ] Confirm failed Office conversion leaves no fresh `pdfstudio_import_*.pdf` cache.
+
 ## Clean Windows 10 and Windows 11 tests
 
 Perform every item on clean machines without Python, developer tools, or a

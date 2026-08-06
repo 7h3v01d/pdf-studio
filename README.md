@@ -426,9 +426,15 @@ src/
 └── about_dialog.py                  Product metadata and About window
 
 tests/                               Structural and regression tests
-docs/                                User Manual and Easy Guide sources/PDFs
-assets/                              Screenshots and artwork
+docs/                                User Manual, Easy Guide, and documentation images
+├── images/                          README/manual artwork only
+assets/                              Runtime startup assets only
+└── splashscreen.png                 Boot splash used by source and packaged builds
 ```
+
+Repository boundary: `assets/` is reserved for runtime application resources and
+currently contains only `splashscreen.png`. README and manual artwork belongs in
+`docs/images/`. The release audit enforces this separation.
 
 Application metadata is centralised in `src/app_metadata.py`:
 
