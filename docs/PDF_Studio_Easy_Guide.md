@@ -2,6 +2,8 @@
 
 A simple guide to reading, filling in, and signing documents.
 
+> **Internal alpha:** use this build only for controlled testing until the remaining release gates are closed.
+
 ---
 
 ## Making it comfortable to read
@@ -41,6 +43,10 @@ This is normal. The main window opens automatically when the picture fades away.
 
 You can also open **Word** documents (`.docx`) and **Excel** spreadsheets
 (`.xlsx`). They may take a few seconds to appear — that is normal.
+
+When an Office document is open, **Save** asks where to create a real PDF. The
+program suggests the original folder and the same name ending in `.pdf`; it never
+treats the hidden temporary conversion as your saved document.
 
 ---
 
@@ -284,3 +290,12 @@ may need Microsoft Word or LibreOffice installed. Ask Leon.
 
 *PDF Studio is free software. There is nothing to buy, no trial, and nothing
 will ever expire.*
+
+
+## Getting help with a problem
+
+1. Click **Help**.
+2. Click **Diagnostics…**.
+3. Click **Copy Diagnostics** and paste the report into your support message.
+
+The report does not copy the words or pictures from your PDF. It does include technical file paths, so look over it before sharing. You can also click **Open Log Folder** to find PDF Studio's bounded troubleshooting logs.

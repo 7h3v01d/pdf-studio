@@ -21,6 +21,11 @@ import sys
 import time
 import traceback
 
+from app_metadata import APP_NAME, APP_VERSION, COMPANY_NAME
+from runtime_support import (
+    configure_logging, install_exception_hook, install_qt_message_logging,
+)
+
 
 def _file_arg(argv):
     """First non-flag argument that points at an existing file."""
@@ -54,18 +59,20 @@ def _handle_registration(argv) -> bool:
 
 def main(argv=None) -> int:
     argv = list(sys.argv if argv is None else argv)
+    configure_logging(APP_VERSION)
+    install_exception_hook()
     if _handle_registration(argv):
         return 0
 
     from PyQt6.QtCore import QTimer
     from PyQt6.QtWidgets import QApplication, QMessageBox
 
-    from about_dialog import APP_NAME, COMPANY_NAME
     from pdf_reader_app import PDFReader
     from splash_screen import PDFStudioSplash
     from startup_splash_core import MIN_SPLASH_MS, remaining_display_ms
 
     app = QApplication(argv)
+    install_qt_message_logging()
     app.setApplicationName(APP_NAME)
     app.setOrganizationName(COMPANY_NAME)
     QApplication.setQuitOnLastWindowClosed(True)
@@ -92,6 +99,10 @@ def main(argv=None) -> int:
             splash.close()
             app.processEvents()
         traceback.print_exc()
+        import logging
+        logging.getLogger("pdf_studio.startup").exception(
+            "PDF Studio could not finish starting"
+        )
         QMessageBox.critical(
             None,
             f"{APP_NAME} startup failed",

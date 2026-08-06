@@ -7,6 +7,8 @@ Selection via checkbox list with thumbnails, or by typing a range string.
 import os
 import fitz
 
+from pdf_job_core import JobCancelled, extract_pages_atomic
+
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QListWidget, QListWidgetItem, QLineEdit, QFileDialog,
@@ -27,31 +29,28 @@ DANGER  = "#dc2626"
 
 class ExtractWorker(QThread):
     progress = pyqtSignal(int, str)
-    finished = pyqtSignal(bool, str)
+    result = pyqtSignal(bool, str)
 
     def __init__(self, src_path: str, page_indices: list[int], out_path: str):
         super().__init__()
-        self.src_path     = src_path
-        self.page_indices = page_indices   # 0-based
-        self.out_path     = out_path
+        self.src_path = src_path
+        self.page_indices = page_indices
+        self.out_path = out_path
 
     def run(self):
         try:
-            src  = fitz.open(self.src_path)
-            out  = fitz.open()
-            n    = len(self.page_indices)
-            for i, idx in enumerate(self.page_indices):
-                self.progress.emit(int(i / n * 90),
-                                   f"Extracting page {idx + 1}…")
-                out.insert_pdf(src, from_page=idx, to_page=idx)
-            self.progress.emit(95, "Saving…")
-            out.save(self.out_path, garbage=3, deflate=True)
-            out.close()
-            src.close()
-            self.progress.emit(100, "Done")
-            self.finished.emit(True, self.out_path)
-        except Exception as e:
-            self.finished.emit(False, str(e))
+            output = extract_pages_atomic(
+                self.src_path,
+                self.page_indices,
+                self.out_path,
+                progress=lambda pct, msg: self.progress.emit(pct, msg),
+                cancelled=self.isInterruptionRequested,
+            )
+            self.result.emit(True, output)
+        except JobCancelled:
+            self.result.emit(False, "Operation cancelled.")
+        except Exception as exc:
+            self.result.emit(False, f"{type(exc).__name__}: {exc}")
 
 
 class ExtractPagesDialog(QDialog):
@@ -70,6 +69,8 @@ class ExtractPagesDialog(QDialog):
         self._src_path = pdf_file_path
         self._total    = pdf_document.page_count
         self._worker   = None
+        self._worker_result = None
+        self._close_when_worker_stops = False
         self._build_ui()
 
     # =========================================================================
@@ -274,9 +275,9 @@ class ExtractPagesDialog(QDialog):
         """)
         self.run_btn.clicked.connect(self._run)
 
-        close_btn = QPushButton("Close")
-        close_btn.setFixedSize(80, 34)
-        close_btn.setStyleSheet(f"""
+        self.close_btn = QPushButton("Close")
+        self.close_btn.setFixedSize(80, 34)
+        self.close_btn.setStyleSheet(f"""
             QPushButton {{
                 background: white; color: {DARK};
                 border: 1px solid #cbd5e1; border-radius: 5px;
@@ -284,9 +285,9 @@ class ExtractPagesDialog(QDialog):
             }}
             QPushButton:hover {{ background: #f1f5f9; }}
         """)
-        close_btn.clicked.connect(self.reject)
+        self.close_btn.clicked.connect(self.reject)
         row.addWidget(self.run_btn)
-        row.addWidget(close_btn)
+        row.addWidget(self.close_btn)
         return w
 
     # =========================================================================
@@ -411,7 +412,9 @@ class ExtractPagesDialog(QDialog):
         if not out.lower().endswith(".pdf"):
             out += ".pdf"
 
+        self._close_when_worker_stops = False
         self.run_btn.setEnabled(False)
+        self.close_btn.setText("Cancel")
         self.progress_bar.setValue(0)
         self.progress_bar.show()
         self.status_label.setText("Working…")
@@ -420,12 +423,34 @@ class ExtractPagesDialog(QDialog):
         self._worker.progress.connect(
             lambda pct, msg: (self.progress_bar.setValue(pct),
                               self.status_label.setText(msg)))
-        self._worker.finished.connect(self._on_done)
+        self._worker.result.connect(
+            lambda ok, msg: setattr(self, "_worker_result", (ok, msg))
+        )
+        self._worker.finished.connect(self._on_worker_thread_finished)
         self._worker.start()
 
-    def _on_done(self, ok: bool, msg: str):
+    def _on_worker_thread_finished(self):
+        result = self._worker_result
+        closing = self._close_when_worker_stops
+        worker = self._worker
+        self._worker = None
+        self._worker_result = None
+        self._close_when_worker_stops = False
         self.run_btn.setEnabled(True)
+        self.close_btn.setEnabled(True)
+        self.close_btn.setText("Close")
         self.progress_bar.hide()
+        if worker is not None:
+            worker.deleteLater()
+        if closing:
+            QDialog.reject(self)
+            return
+        if result is None:
+            self._on_done(False, "The worker stopped without reporting a result.")
+            return
+        self._on_done(*result)
+
+    def _on_done(self, ok: bool, msg: str):
         if ok:
             self.status_label.setText(
                 f"✔  Saved → {os.path.basename(msg)}")
@@ -438,13 +463,46 @@ class ExtractPagesDialog(QDialog):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             if reply == QMessageBox.StandardButton.Yes:
                 self.open_file_requested.emit(msg)
-                self.accept()
+                QDialog.accept(self)
         else:
-            self.status_label.setText(f"✖  {msg}")
-            self.status_label.setStyleSheet(
-                f"color: {DANGER}; font-size: 11px; padding: 3px 16px;"
-                " font-weight: bold;")
-            QMessageBox.critical(self, "Error", f"Extraction failed:\n{msg}")
+            if msg == "Operation cancelled.":
+                self.status_label.setText("Operation cancelled.")
+            else:
+                self.status_label.setText(f"✖  {msg}")
+                self.status_label.setStyleSheet(
+                    f"color: {DANGER}; font-size: 11px; padding: 3px 16px;"
+                    " font-weight: bold;")
+                QMessageBox.critical(self, "Error", f"Extraction failed:\n{msg}")
+
+    def _request_worker_cancel(self) -> bool:
+        if self._worker is None or not self._worker.isRunning():
+            return False
+        reply = QMessageBox.question(
+            self,
+            "Cancel Extraction?",
+            "Extraction is still running. Cancel it and close this window "
+            "after the worker stops?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return True
+        self._close_when_worker_stops = True
+        self._worker.requestInterruption()
+        self.close_btn.setEnabled(False)
+        self.status_label.setText("Cancelling safely after the current page...")
+        return True
+
+    def reject(self):
+        if self._request_worker_cancel():
+            return
+        QDialog.reject(self)
+
+    def closeEvent(self, event):
+        if self._request_worker_cancel():
+            event.ignore()
+            return
+        event.accept()
 
     # =========================================================================
     # Helpers

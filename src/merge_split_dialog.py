@@ -8,6 +8,8 @@ Standalone dialog — no dependency on the main app state.
 import os
 import fitz
 
+from pdf_job_core import JobCancelled, merge_pdfs_atomic, split_pdf_transactional
+
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTabWidget, QWidget, QListWidget, QListWidgetItem, QFileDialog,
@@ -31,8 +33,8 @@ DANGER  = "#dc2626"
 # ─────────────────────────────────────────────────────────────────────────────
 
 class MergeWorker(QThread):
-    progress = pyqtSignal(int, str)   # (percent, message)
-    finished = pyqtSignal(bool, str)  # (success, message)
+    progress = pyqtSignal(int, str)
+    result = pyqtSignal(bool, str)
 
     def __init__(self, input_paths: list[str], output_path: str):
         super().__init__()
@@ -41,81 +43,70 @@ class MergeWorker(QThread):
 
     def run(self):
         try:
-            merged = fitz.open()
-            total = len(self.input_paths)
-            for i, path in enumerate(self.input_paths):
-                self.progress.emit(
-                    int((i / total) * 90),
-                    f"Adding: {os.path.basename(path)}")
-                src = fitz.open(path)
-                merged.insert_pdf(src)
-                src.close()
-            self.progress.emit(95, "Saving…")
-            merged.save(self.output_path, garbage=3, deflate=True)
-            merged.close()
-            self.progress.emit(100, "Done")
-            self.finished.emit(True, self.output_path)
-        except Exception as e:
-            self.finished.emit(False, str(e))
+            output = merge_pdfs_atomic(
+                self.input_paths,
+                self.output_path,
+                progress=lambda pct, msg: self.progress.emit(pct, msg),
+                cancelled=self.isInterruptionRequested,
+            )
+            self.result.emit(True, output)
+        except JobCancelled:
+            self.result.emit(False, "Operation cancelled.")
+        except Exception as exc:
+            self.result.emit(False, f"{type(exc).__name__}: {exc}")
 
 
 class SplitWorker(QThread):
     progress = pyqtSignal(int, str)
-    finished = pyqtSignal(bool, str, list)  # (success, message, output_files)
+    result = pyqtSignal(bool, str, list)
 
     def __init__(self, input_path: str, output_dir: str,
                  mode: str, value: int, ranges: list[tuple]):
-        """
-        mode  : 'every_n'   – split every N pages
-                'fixed'     – split into N equal parts
-                'ranges'    – split by explicit page ranges [(s,e), ...]
-        """
         super().__init__()
         self.input_path = input_path
         self.output_dir = output_dir
-        self.mode       = mode
-        self.value      = value     # N (pages or parts)
-        self.ranges     = ranges    # used when mode == 'ranges'
+        self.mode = mode
+        self.value = value
+        self.ranges = ranges
+
+    def _chunks(self, total: int) -> list[tuple[int, int]]:
+        if self.mode == "every_n":
+            n = max(1, self.value)
+            return [(i, min(i + n - 1, total - 1))
+                    for i in range(0, total, n)]
+        if self.mode == "fixed":
+            n = min(max(1, self.value), total)
+            size, remainder = divmod(total, n)
+            chunks = []
+            start = 0
+            for index in range(n):
+                end = start + size + (1 if index < remainder else 0) - 1
+                chunks.append((start, end))
+                start = end + 1
+            return chunks
+        return list(self.ranges)
 
     def run(self):
-        out_files = []
         try:
-            src   = fitz.open(self.input_path)
-            total = src.page_count
-            base  = os.path.splitext(os.path.basename(self.input_path))[0]
-
-            if self.mode == "every_n":
-                n = max(1, self.value)
-                chunks = [(i, min(i + n - 1, total - 1))
-                          for i in range(0, total, n)]
-            elif self.mode == "fixed":
-                n = max(1, self.value)
-                size = total // n
-                rem  = total % n
-                chunks, start = [], 0
-                for i in range(n):
-                    end = start + size + (1 if i < rem else 0) - 1
-                    chunks.append((start, end))
-                    start = end + 1
-            else:  # ranges
-                chunks = self.ranges
-
-            for idx, (s, e) in enumerate(chunks):
-                pct = int(((idx) / len(chunks)) * 95)
-                self.progress.emit(pct, f"Writing part {idx + 1}/{len(chunks)}…")
-                out_name = f"{base}_part{idx + 1:03d}.pdf"
-                out_path = os.path.join(self.output_dir, out_name)
-                part = fitz.open()
-                part.insert_pdf(src, from_page=s, to_page=e)
-                part.save(out_path, garbage=3, deflate=True)
-                part.close()
-                out_files.append(out_path)
-
-            src.close()
-            self.progress.emit(100, "Done")
-            self.finished.emit(True, f"Created {len(out_files)} file(s)", out_files)
-        except Exception as e:
-            self.finished.emit(False, str(e), [])
+            source = fitz.open(self.input_path)
+            try:
+                total = source.page_count
+            finally:
+                source.close()
+            outputs = split_pdf_transactional(
+                self.input_path,
+                self.output_dir,
+                self._chunks(total),
+                progress=lambda pct, msg: self.progress.emit(pct, msg),
+                cancelled=self.isInterruptionRequested,
+            )
+            self.result.emit(
+                True, f"Created {len(outputs)} file(s)", outputs
+            )
+        except JobCancelled:
+            self.result.emit(False, "Operation cancelled.", [])
+        except Exception as exc:
+            self.result.emit(False, f"{type(exc).__name__}: {exc}", [])
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -135,6 +126,8 @@ class MergeSplitDialog(QDialog):
         self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
         self._current_pdf = current_pdf_path
         self._worker = None
+        self._worker_result = None
+        self._close_when_worker_stops = False
         self._build_ui()
 
     # =========================================================================
@@ -554,9 +547,9 @@ class MergeSplitDialog(QDialog):
         """)
         self.run_btn.clicked.connect(self._run)
 
-        close_btn = QPushButton("Close")
-        close_btn.setFixedSize(80, 34)
-        close_btn.setStyleSheet(f"""
+        self.close_btn = QPushButton("Close")
+        self.close_btn.setFixedSize(80, 34)
+        self.close_btn.setStyleSheet(f"""
             QPushButton {{
                 background: white; color: {DARK};
                 border: 1px solid #cbd5e1; border-radius: 5px;
@@ -564,11 +557,11 @@ class MergeSplitDialog(QDialog):
             }}
             QPushButton:hover {{ background: #f1f5f9; }}
         """)
-        close_btn.clicked.connect(self.reject)
+        self.close_btn.clicked.connect(self.reject)
 
         row.addStretch()
         row.addWidget(self.run_btn)
-        row.addWidget(close_btn)
+        row.addWidget(self.close_btn)
         return w
 
     # =========================================================================
@@ -598,7 +591,10 @@ class MergeSplitDialog(QDialog):
         self._start_worker()
         self._worker = MergeWorker(paths, out)
         self._worker.progress.connect(self._on_progress)
-        self._worker.finished.connect(self._on_merge_done)
+        self._worker.result.connect(
+            lambda ok, msg: setattr(self, "_worker_result", ("merge", ok, msg))
+        )
+        self._worker.finished.connect(self._on_worker_thread_finished)
         self._worker.start()
 
     def _run_split(self):
@@ -636,7 +632,12 @@ class MergeSplitDialog(QDialog):
         self._start_worker()
         self._worker = SplitWorker(src, out_dir, mode, value, ranges)
         self._worker.progress.connect(self._on_progress)
-        self._worker.finished.connect(self._on_split_done)
+        self._worker.result.connect(
+            lambda ok, msg, files: setattr(
+                self, "_worker_result", ("split", ok, msg, files)
+            )
+        )
+        self._worker.finished.connect(self._on_worker_thread_finished)
         self._worker.start()
 
     # =========================================================================
@@ -644,7 +645,9 @@ class MergeSplitDialog(QDialog):
     # =========================================================================
 
     def _start_worker(self):
+        self._close_when_worker_stops = False
         self.run_btn.setEnabled(False)
+        self.close_btn.setText("Cancel")
         self.progress_bar.setValue(0)
         self.progress_bar.show()
         self.status_label.setText("Working…")
@@ -654,7 +657,6 @@ class MergeSplitDialog(QDialog):
         self.status_label.setText(msg)
 
     def _on_merge_done(self, ok: bool, msg: str):
-        self._finish_worker()
         if ok:
             self.status_label.setText(f"✔  Merged successfully → {os.path.basename(msg)}")
             self.status_label.setStyleSheet(
@@ -665,12 +667,14 @@ class MergeSplitDialog(QDialog):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             if reply == QMessageBox.StandardButton.Yes:
                 self.open_file_requested.emit(msg)
-                self.accept()
+                QDialog.accept(self)
         else:
-            self._show_error(f"Merge failed: {msg}")
+            if msg == "Operation cancelled.":
+                self.status_label.setText("Operation cancelled.")
+            else:
+                self._show_error(f"Merge failed: {msg}")
 
     def _on_split_done(self, ok: bool, msg: str, files: list):
-        self._finish_worker()
         if ok:
             self.status_label.setText(f"✔  {msg}")
             self.status_label.setStyleSheet(
@@ -684,13 +688,72 @@ class MergeSplitDialog(QDialog):
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             if reply == QMessageBox.StandardButton.Yes and files:
                 self.open_file_requested.emit(files[0])
-                self.accept()
+                QDialog.accept(self)
         else:
-            self._show_error(f"Split failed: {msg}")
+            if msg == "Operation cancelled.":
+                self.status_label.setText("Operation cancelled.")
+            else:
+                self._show_error(f"Split failed: {msg}")
+
+    def _on_worker_thread_finished(self):
+        result = self._worker_result
+        closing = self._close_when_worker_stops
+        self._finish_worker()
+        if closing:
+            QDialog.reject(self)
+            return
+        if not result:
+            self._show_error("The worker stopped without reporting a result.")
+            return
+        if result[0] == "merge":
+            _kind, ok, message = result
+            self._on_merge_done(ok, message)
+        else:
+            _kind, ok, message, files = result
+            self._on_split_done(ok, message, files)
 
     def _finish_worker(self):
+        worker = self._worker
+        self._worker = None
+        self._worker_result = None
+        self._close_when_worker_stops = False
         self.run_btn.setEnabled(True)
+        self.close_btn.setEnabled(True)
+        self.close_btn.setText("Close")
         self.progress_bar.hide()
+        if worker is not None:
+            worker.deleteLater()
+
+
+    def _request_worker_cancel(self) -> bool:
+        if self._worker is None or not self._worker.isRunning():
+            return False
+        reply = QMessageBox.question(
+            self,
+            "Cancel PDF Operation?",
+            "The operation is still running. Cancel it and close this window "
+            "after the worker stops?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return True
+        self._close_when_worker_stops = True
+        self._worker.requestInterruption()
+        self.close_btn.setEnabled(False)
+        self.status_label.setText("Cancelling safely after the current unit...")
+        return True
+
+    def reject(self):
+        if self._request_worker_cancel():
+            return
+        QDialog.reject(self)
+
+    def closeEvent(self, event):
+        if self._request_worker_cancel():
+            event.ignore()
+            return
+        event.accept()
 
     # =========================================================================
     # Helpers

@@ -29,6 +29,10 @@ import subprocess
 import sys
 import tempfile
 import uuid
+import time
+from pathlib import Path
+
+import fitz
 
 # Extensions we can import. Word-like route through Word/Writer; spreadsheet
 # extensions route through Excel/Calc.
@@ -126,6 +130,54 @@ def available_engines() -> dict:
     }
 
 
+def _validate_converted_pdf(path: str, *, started_at: float | None = None) -> str:
+    """Require a fresh, parseable PDF before a converter may report success."""
+    if not os.path.isfile(path):
+        raise ConversionError("The converter did not create the expected PDF.")
+    if started_at is not None:
+        try:
+            # Filesystem timestamp precision differs, so tolerate two seconds.
+            if os.path.getmtime(path) < started_at - 2.0:
+                raise ConversionError("The converter output is stale.")
+        except OSError as exc:
+            raise ConversionError(f"Could not inspect converter output: {exc}") from exc
+    try:
+        check = fitz.open(path)
+    except Exception as exc:
+        raise ConversionError(f"The converter output is not a valid PDF: {exc}") from exc
+    try:
+        if check.page_count < 1:
+            raise ConversionError("The converter output contains no pages.")
+        for page_number in range(check.page_count):
+            _ = check.load_page(page_number).rect
+    finally:
+        check.close()
+    return path
+
+
+
+def imported_pdf_default_path(source_path: str) -> str:
+    """Return the durable PDF destination suggested for an imported document."""
+    source = Path(source_path).expanduser().resolve()
+    return str(source.with_suffix(".pdf"))
+
+
+def cleanup_temporary_import(path: str | None) -> bool:
+    """Delete only PDF Studio conversion-cache files from the system temp dir."""
+    if not path:
+        return False
+    candidate = Path(path).expanduser().resolve()
+    temp_root = Path(tempfile.gettempdir()).resolve()
+    if candidate.parent != temp_root:
+        return False
+    if not candidate.name.startswith("pdfstudio_import_") or candidate.suffix.lower() != ".pdf":
+        return False
+    try:
+        candidate.unlink(missing_ok=True)
+    except OSError:
+        return False
+    return True
+
 # ── Public entry point ───────────────────────────────────────────────────────
 
 def convert_to_pdf(src_path: str, prefer: str | None = None) -> str:
@@ -191,7 +243,7 @@ def _convert_word_com(src_path: str, out_pdf: str) -> str:
             OutputFileName=os.path.abspath(out_pdf),
             ExportFormat=17,
         )
-        return out_pdf
+        return _validate_converted_pdf(out_pdf)
     finally:
         try:
             if doc is not None:
@@ -220,7 +272,7 @@ def _convert_excel_com(src_path: str, out_pdf: str) -> str:
         wb = excel.Workbooks.Open(os.path.abspath(src_path), ReadOnly=True)
         # xlTypePDF = 0
         wb.ExportAsFixedFormat(0, os.path.abspath(out_pdf))
-        return out_pdf
+        return _validate_converted_pdf(out_pdf)
     finally:
         try:
             if wb is not None:
@@ -242,14 +294,10 @@ def _convert_libreoffice(src_path: str, out_pdf: str, timeout: int = 120) -> str
     if not soffice:
         raise ImportUnavailable("LibreOffice was not found.")
 
-    out_dir = os.path.dirname(out_pdf)
-    # A unique per-run profile avoids the "another instance is running" lock
-    # when the user already has LibreOffice open.
-    profile = os.path.join(
-        tempfile.gettempdir(), f"pdfstudio_lo_{uuid.uuid4().hex[:8]}"
-    )
-    # A correct file URI (file:///C:/... on Windows) — a bare "file://C:\..."
-    # is malformed and LibreOffice may reject it.
+    # Both the LibreOffice profile and output workspace are unique per run.
+    # Same-basename conversions can therefore never consume one another's files.
+    profile = tempfile.mkdtemp(prefix="pdfstudio_lo_profile_")
+    workspace = tempfile.mkdtemp(prefix="pdfstudio_lo_output_")
     from pathlib import Path
     profile_uri = Path(profile).as_uri()
     cmd = [
@@ -259,29 +307,41 @@ def _convert_libreoffice(src_path: str, out_pdf: str, timeout: int = 120) -> str
         "--nolockcheck",
         f"-env:UserInstallation={profile_uri}",
         "--convert-to", "pdf",
-        "--outdir", out_dir,
+        "--outdir", workspace,
         os.path.abspath(src_path),
     ]
+    started_at = time.time()
     try:
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout,
-            env=_clean_subprocess_env(),
+        try:
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+                env=_clean_subprocess_env(),
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise ConversionError("LibreOffice took too long and was stopped.") from exc
+
+        details = (proc.stderr or proc.stdout or "").strip()[:400]
+        if proc.returncode != 0:
+            raise ConversionError(
+                "LibreOffice reported a conversion failure."
+                + (f"\n\n{details}" if details else "")
+            )
+
+        produced = os.path.join(
+            workspace,
+            os.path.splitext(os.path.basename(src_path))[0] + ".pdf",
         )
-    except subprocess.TimeoutExpired:
-        raise ConversionError("LibreOffice took too long and was stopped.")
+        _validate_converted_pdf(produced, started_at=started_at)
+
+        # The public target is already unique, but commit with os.replace only
+        # after full validation so an existing file is never consumed as input.
+        os.makedirs(os.path.dirname(os.path.abspath(out_pdf)), exist_ok=True)
+        os.replace(produced, out_pdf)
+        return _validate_converted_pdf(out_pdf, started_at=started_at)
     finally:
         shutil.rmtree(profile, ignore_errors=True)
+        shutil.rmtree(workspace, ignore_errors=True)
 
-    # LibreOffice writes <basename>.pdf into out_dir; rename to our target.
-    produced = os.path.join(
-        out_dir, os.path.splitext(os.path.basename(src_path))[0] + ".pdf"
-    )
-    if os.path.exists(produced):
-        if os.path.abspath(produced) != os.path.abspath(out_pdf):
-            shutil.move(produced, out_pdf)
-        return out_pdf
-
-    raise ConversionError(
-        "LibreOffice did not produce a PDF.\n\n"
-        f"{(proc.stderr or proc.stdout or '').strip()[:400]}"
-    )

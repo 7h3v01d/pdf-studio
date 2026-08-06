@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "artifact_sha256": "",
+  "windows_10": {
+    "status": "not-run",
+    "edition_and_build": "",
+    "tested_utc": "",
+    "tester": "",
+    "notes": ""
+  },
+  "windows_11": {
+    "status": "not-run",
+    "edition_and_build": "",
+    "tested_utc": "",
+    "tester": "",
+    "notes": ""
+  }
+}

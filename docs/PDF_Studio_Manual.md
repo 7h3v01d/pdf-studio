@@ -1,6 +1,6 @@
 # PDF Studio — User Manual
 
-**Version 3.2-alpha6** · Free and open source · Apache License 2.0
+**Version 3.2-alpha10** · Internal alpha · Application source: Apache-2.0
 Leon Priest — [github.com/7h3v01d](https://github.com/7h3v01d)
 
 ---
@@ -38,9 +38,15 @@ Leon Priest — [github.com/7h3v01d](https://github.com/7h3v01d)
 PDF Studio is a free, full-featured PDF reader and editor for Windows, built
 with Python, PyQt6, and PyMuPDF.
 
-It is **free in every sense**: there is no trial, no activation, no licence key,
-and no feature is locked behind a paywall. The source is released under the
-Apache License 2.0.
+PDF Studio does not contain a trial, activation, licence key, or feature
+paywall. The application source is released under Apache-2.0. Distribution of a
+bundled executable remains under review because third-party runtime components
+carry their own licence obligations.
+
+> **Internal alpha:** version 3.2-alpha10 includes three data-integrity
+> remediation passes plus the first release-assurance layer. Destructive PDF operations and background output jobs now
+> use staged, validated transaction boundaries, but packaged-GUI, dependency,
+> licensing, and clean-machine release gates remain. See `KNOWN_ISSUES.md`.
 
 **Highlights**
 
@@ -62,7 +68,7 @@ Apache License 2.0.
 ### Requirements
 
 - Windows 10 or 11 (the app also runs on Linux/macOS from source)
-- Python 3.10+ *(only if running from source)*
+- Python 3.11 *(only if running from source; required by the validated build workflow)*
 
 ### Option A — Run the built executable
 
@@ -178,8 +184,11 @@ PDF Studio picks the highest-fidelity converter available:
 3. If neither is installed, the app explains what to install rather than
    producing a poor conversion.
 
-> **Note:** Imported documents are opened *as PDFs*. Saving produces a PDF, not
-> a Word file. This is a view-and-markup path, not round-trip Word editing.
+> **Note:** Imported documents are opened *as PDFs*. The converted PDF is a
+> temporary viewing cache, not a user-owned destination. `Ctrl+S` therefore opens
+> **Save As** and suggests `<original-name>.pdf` beside the Office source. The
+> cache is removed when the imported session ends. This is a view-and-markup path,
+> not round-trip Word editing.
 
 ### Password-protected PDFs
 
@@ -243,9 +252,13 @@ Select a tool from the markup toolbar, then use the mouse on the page. Press
 The **Annotations** section of the navigation panel lists every annotation in
 the document. Click one to jump to it, or delete it from there.
 
-All markup supports **Undo/Redo** (`Ctrl+Z` / `Ctrl+Y`).
+Before save, new notes and markup remain deferred and undoable. After a successful
+save they become native PDF annotations and the legacy sidecar entry is retired,
+so the same item is not drawn or listed twice after reopening.
 
-Markup becomes part of the document when you **Save**.
+Markup, native annotation deletion, signatures, and stamps support **Undo/Redo**
+(`Ctrl+Z` / `Ctrl+Y`). Native-image undo is memory-bounded to prevent unlimited
+RAM growth on large documents.
 
 ---
 
@@ -493,6 +506,12 @@ All page operations are undoable (`Ctrl+Z`), including drag-reordering.
 **Tools → Extract Pages…** — pull a page range or selection into a new PDF,
 leaving the original untouched.
 
+Merge and extraction write to a validated staged PDF before replacing the chosen
+destination. Split stages and validates every part before committing the set. If
+a later part cannot be committed, earlier replacements are rolled back. Closing
+a working dialog requests cancellation and waits for the worker to stop instead
+of destroying a live thread.
+
 ---
 
 ## 15. Password protection
@@ -558,6 +577,8 @@ separate GIF files rather than an animation.
 
 PDF Studio stages all selected pages before replacing destination files. If a
 page fails or the run is cancelled, it does not leave a half-created export set.
+Word and Excel exports now follow the same principle: the generated DOCX/XLSX is
+validated as an OOXML archive before it can replace an existing destination.
 
 ### Microsoft Word
 
@@ -594,7 +615,9 @@ without wasting paper. The preview is produced by the same rendering code as the
 actual print, so what you see is what you get.
 
 Annotations, markup, signatures, stamps, and form entries are all embedded on
-save. An asterisk (`*`) in the title bar indicates unsaved changes.
+save. Same-file save preparation is snapshot-protected: if preparation or the
+incremental write fails, PDF Studio restores the pre-save in-memory document.
+An asterisk (`*`) in the title bar indicates unsaved changes.
 
 ---
 
@@ -673,45 +696,45 @@ Or use `register_pdf.bat` / `unregister_pdf.bat`.
 
 ## 21. Building from source
 
-Build in a **clean, isolated environment**. If unrelated packages are visible to
-PyInstaller (a second Qt binding such as PyQt5, other projects on your path,
-etc.) the build may pull them in or abort.
-
-**Easiest:**
+Build in a **clean, isolated Python 3.11 environment**. The supported internal
+build path is:
 
 ```bat
 build_clean.bat
 ```
 
-Creates a throwaway `.buildenv`, installs only what's needed, builds, and leaves
-the executable in `src\dist\`.
+It creates a fresh `.buildenv`, installs the declared build dependencies, runs
+`pip check`, executes the full test suite, captures exact package versions,
+runs the release audit, generates the build manifest, and invokes PyInstaller.
+Any failed command stops the build. The internal executable is left in
+`src\dist\`.
 
-**Manual:**
+For day-to-day work, run `setup.bat` once, then use `buildit.bat`. It performs the
+same validation gates using `.venv`.
 
-```bat
-python -m venv .venv
-call .venv\Scripts\activate.bat
-python -m pip install pyinstaller
-python -m pip install -r requirements.txt
-cd src
-python -m PyInstaller "PDF Studio.spec"
-```
+Release-assurance utilities:
+
+- `capture_release_environment.bat` records exact versions from a passing Windows environment.
+- `prepare_release_wheelhouse.bat` downloads those versions and records SHA-256 hashes.
+- `release_check.bat` checks the public-release policy and deliberately fails while licensing approval is unresolved.
+- `build_release.bat` uses the verified offline wheelhouse and is available only after every public-release gate passes.
 
 > **Always use `python -m PyInstaller`, never a bare `pyinstaller`.** The bare
-> command runs whichever copy is first on your `PATH` — often a *global* one that
-> builds against your global environment, even when a venv appears active.
+> command may use a global installation or the wrong environment.
 
-Whatever optional packages are installed at build time are bundled into the
-executable. To include Word export, ensure `pdf2docx` is installed before
-building.
-
-**Renaming the app:** `APP_NAME`, `APP_VERSION`, and `COMPANY_NAME` at the top of
-`src/about_dialog.py` are the single source of truth for the title bar, About
-box, and menus. The executable's name is set in `src/PDF Studio.spec`.
+Application metadata is centralised in `src/app_metadata.py`. The executable
+name and bundled release resources are defined in `src/PDF Studio.spec`.
 
 ---
 
 ## 22. Troubleshooting
+
+### Diagnostics and logs
+
+Choose **Help → Diagnostics…** to copy a support report or open the rotating log folder. The report includes application, runtime, dependency, Tesseract, and build information, but no PDF document text. Review file paths before sharing it.
+
+Choose **Help → Third-Party Licences and Notices…** to inspect the bundled dependency inventory and current distribution warning.
+
 
 **A Word/Excel document won't open**
 Install **Microsoft Office** (best fidelity) or **LibreOffice** (free). Large
@@ -757,23 +780,28 @@ A markup tool is active. Press `Esc`.
 
 ## 23. Licence and credits
 
-**PDF Studio** — Copyright © 2025 Leon Priest.
-Licensed under the **Apache License, Version 2.0**. See `LICENSE.txt`.
+**PDF Studio** - Copyright © 2025-2026 Leon Priest.
+The application source currently declares the **Apache License, Version 2.0**.
+See `LICENSE.txt`.
 
 ### Third-party components
 
-| Component | Licence |
+| Component | Licence choices / status |
 |---|---|
-| **PyMuPDF** (fitz) | AGPL-3.0 / commercial (Artifex) |
-| **PyQt6** | GPL-3.0 / commercial (Riverbank) |
-| **Atkinson Hyperlegible** | SIL Open Font License 1.1 — © 2020 Braille Institute of America |
+| **PyMuPDF / MuPDF** | AGPL-3.0 or commercial terms (Artifex) |
+| **PyQt6** | GPL-3.0 or Riverbank commercial terms |
+| **Qt 6** | Separate Qt licensing applies |
+| **Pillow** | Pillow/HPND-style licence |
+| **pytesseract** | Apache-2.0 |
+| **Atkinson Hyperlegible** | SIL Open Font License 1.1 - © 2020 Braille Institute of America |
 
-Optional: `pdf2docx`, `tabula-py`,
-`openpyxl`, `pandas`, `pywin32`.
+Optional packages may include `pdf2docx`, `tabula-py`, `openpyxl`, `pandas`,
+and `pywin32`.
 
-See `NOTICE` for full attributions.
+See `NOTICE`, `THIRD_PARTY_NOTICES.md`, and the bundled `licenses` folder.
 
-> **Note on redistribution:** PyMuPDF and PyQt6 are licensed under the AGPL and
-> GPL respectively. If you distribute a built executable publicly, those terms
-> apply to the distributed binary. Sharing it privately (for example, with
-> family) is unaffected.
+> **Distribution gate:** a bundled binary is not approved for family or public
+> distribution until the project owner deliberately resolves the PyMuPDF/MuPDF,
+> PyQt6, and Qt licensing strategy and records approval in
+> `release/release_policy.json`. `release_check.bat` enforces this gate. This is
+> an engineering safeguard, not legal advice.

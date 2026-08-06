@@ -11,18 +11,10 @@ from PyQt6.QtCore import Qt, QSize, QRect
 
 
 # ── App metadata — SINGLE SOURCE OF TRUTH ────────────────────────────────────
-# Change APP_NAME here and the whole app (title bar, About box, menus) follows.
-APP_NAME      = "PDF Studio"
-APP_VERSION   = "3.2.0-alpha6"
-COMPANY_NAME  = "Leon Priest"
-LEAD_DEV      = "Leon Priest · github.com/7h3v01d"
-DESCRIPTION = (
-    "A professional PDF reader and editor for modern document workflows.\n"
-    "Open, annotate, sign, redact, fill forms, and organize PDF files\n"
-    "within a clean, capable, and production-ready interface."
+from app_metadata import (
+    APP_NAME, APP_VERSION, COMPANY_NAME, LEAD_DEV, DESCRIPTION, COPYRIGHT,
+    BUILT_WITH, SOURCE_LICENSE, DISTRIBUTION_STATUS,
 )
-COPYRIGHT     = "© 2025 Leon Priest — Apache License 2.0"
-BUILT_WITH    = "PyMuPDF (MuPDF)  ·  PyQt6  ·  Python 3"
 # ─────────────────────────────────────────────────────────────────────────────
 
 ACCENT   = "#2563EB"   # accent
@@ -81,7 +73,8 @@ class AboutDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle(f"About {APP_NAME}")
         self.setModal(True)
-        self.setFixedSize(560, 480)
+        self.setMinimumSize(560, 500)
+        self.resize(600, 580)
         self.setWindowFlag(Qt.WindowType.WindowContextHelpButtonHint, False)
         self._build_ui()
 
@@ -194,6 +187,12 @@ class AboutDialog(QDialog):
             "Company",
             f"{COMPANY_NAME}\n{LEAD_DEV}",
             icon="🏢"
+        ))
+
+        layout.addWidget(self._card(
+            "Licensing Status",
+            f"Application source: {SOURCE_LICENSE}\n{DISTRIBUTION_STATUS}",
+            icon="⚖"
         ))
 
         layout.addStretch()

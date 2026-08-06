@@ -6,7 +6,9 @@ Core application logic.  Inherits all UI from PDFReaderUI.
 import sys
 import os
 import json
+import logging
 from dataclasses import asdict
+from pathlib import Path
 import fitz  # PyMuPDF
 from PyQt6.QtWidgets import (
     QInputDialog, QMessageBox, QLabel, QMenu, QFileDialog,
@@ -21,7 +23,7 @@ from PyQt6.QtCore import Qt, QRectF, QPoint, QSize, QSettings, QDate, QTimer
 from PyQt6.QtPrintSupport import QPrinter, QPrintDialog
 
 from pdf_reader_ui import PDFReaderUI
-from about_dialog import APP_NAME
+from app_metadata import APP_NAME
 from password_dialog import PasswordPromptDialog, PasswordProtectDialog
 from undo_stack import UndoStack, Command
 from form_designer_core import (
@@ -73,7 +75,31 @@ from scan_text_edit_core import (
 from scan_text_edit_dialog import ScanTextEditDialog
 from scan_text_edit_worker import ScanTextOCRWorker
 from tesseract_setup import configure_tesseract
+from document_integrity_core import (
+    apply_redactions_transactionally,
+    clone_pdf_document,
+    flatten_form_atomic,
+    insert_signature_image_once,
+    new_document_session_id,
+    open_pdf_snapshot,
+    save_pdf_atomic,
+    sibling_staged_path,
+    snapshot_pdf_bytes,
+    validate_pdf_file,
+)
+from annotation_integrity_core import (
+    atomic_write_json,
+    pending_markup_only,
+    retire_baked_sidecar_state,
+)
+from save_bundle_core import (
+    StagedOperation,
+    cleanup_staged_operations,
+    commit_staged_operations,
+    stage_json_payload,
+)
 from form_field_dialog import FormFieldPropertiesDialog
+from page_state_core import move_page_to_final_index, restore_page_bound_state
 from pdf_utils import (
     load_annotations, save_annotations, load_bookmarks, save_bookmarks,
     search_text, next_search_result, prev_search_result,
@@ -130,6 +156,8 @@ class PDFReader(PDFReaderUI):
         # ── Document state ───────────────────────────────────────────────
         self.pdf_document    = None
         self.pdf_file_path   = ""
+        self._imported_source_path = None
+        self._imported_temp_pdf_path = None
         self.current_page    = 0
         self.total_pages     = 0
         self.zoom_level      = 1.0
@@ -144,8 +172,10 @@ class PDFReader(PDFReaderUI):
         self.annotation_mode      = False  # kept for back-compat
         self.markup_color         = QColor("#FFFF00")  # default yellow
 
-        # Pending redaction boxes: {page_num: [fitz.Rect, ...]}
+        # Pending redaction boxes are valid only for one loaded-document session.
         self.pending_redactions = {}
+        self._document_session_id = None
+        self._pending_redaction_session_id = None
 
         # Freehand drawing buffers
         self._freehand_drawing    = False
@@ -269,6 +299,140 @@ class PDFReader(PDFReaderUI):
 
         self.update_status_bar()
 
+    def _reset_document_session_state(self):
+        """Clear every application-side value that belongs to one PDF session."""
+        self.pending_redactions = {}
+        self._pending_redaction_session_id = None
+        self._imported_source_path = None
+        self._imported_temp_pdf_path = None
+        self.annotations = {}
+        self.markup_strokes = {}
+        self.bookmarks = []
+        self.search_results = []
+        self.current_search_index = -1
+        self.selection_start_point = None
+        self.selection_end_point = None
+        self.current_selection_page = -1
+        self.is_selecting_text = False
+        self._freehand_drawing = False
+        self._freehand_points = []
+        self._freehand_page = -1
+        self._pending_signature = None
+        self._pending_stamp = None
+        self.active_tool = TOOL_NONE
+        self.annotation_mode = False
+        self.form_fields = {}
+        self.field_widgets = {}
+        self._radio_groups = {}
+        self._form_dirty = False
+        self._form_design_mode = False
+        self._form_design_tool = FORM_TOOL_SELECT
+        self._selected_form_ref = None
+        self._form_drag_action = None
+        self._form_drag_page = -1
+        self._form_drag_start_pdf = None
+        self._form_drag_original_rect = None
+        self._form_preview_rect = None
+        self._form_suggestions = []
+        self._selected_form_suggestion_id = None
+        self._form_detection_context = None
+        self._form_detection_statistics = {}
+        self._scan_text_context = None
+        self._requires_full_rewrite = False
+        self.pages = []
+        self._undo_stack.clear()
+
+    def _capture_open_session(self):
+        """Capture the current session so a failed document open can roll back."""
+        return {
+            "pdf_document": self.pdf_document,
+            "pdf_file_path": self.pdf_file_path,
+            "imported_source_path": self._imported_source_path,
+            "imported_temp_pdf_path": self._imported_temp_pdf_path,
+            "document_session_id": self._document_session_id,
+            "pending_redaction_session_id": self._pending_redaction_session_id,
+            "pending_redactions": self.pending_redactions,
+            "annotations": self.annotations,
+            "markup_strokes": self.markup_strokes,
+            "bookmarks": self.bookmarks,
+            "search_results": self.search_results,
+            "current_search_index": self.current_search_index,
+            "current_page": self.current_page,
+            "total_pages": self.total_pages,
+            "rotation": self.rotation,
+            "requires_full_rewrite": self._requires_full_rewrite,
+            "form_dirty": self._form_dirty,
+            "undo": self._undo_stack.snapshot(),
+            "window_title": self.windowTitle(),
+        }
+
+    def _restore_open_session(self, snapshot):
+        """Restore a captured session after a new-document initialisation failure."""
+        self._reset_document_session_state()
+        self.pdf_document = snapshot["pdf_document"]
+        self.pdf_file_path = snapshot["pdf_file_path"]
+        self._imported_source_path = snapshot.get("imported_source_path")
+        self._imported_temp_pdf_path = snapshot.get("imported_temp_pdf_path")
+        self._document_session_id = snapshot["document_session_id"]
+        self._pending_redaction_session_id = snapshot[
+            "pending_redaction_session_id"
+        ]
+        self.pending_redactions = snapshot["pending_redactions"]
+        self.annotations = snapshot["annotations"]
+        self.markup_strokes = snapshot["markup_strokes"]
+        self.bookmarks = snapshot["bookmarks"]
+        self.search_results = snapshot["search_results"]
+        self.current_search_index = snapshot["current_search_index"]
+        self.current_page = snapshot["current_page"]
+        self.total_pages = snapshot["total_pages"]
+        self.rotation = snapshot["rotation"]
+        self._requires_full_rewrite = snapshot["requires_full_rewrite"]
+        self._form_dirty = snapshot["form_dirty"]
+        self._undo_stack.restore(snapshot["undo"])
+        self.setWindowTitle(snapshot["window_title"])
+        if self.pdf_document is not None:
+            self._refresh_after_document_replacement(self.current_page)
+            self._enable_all_controls()
+        else:
+            self.pages = []
+            self.update_view()
+        self._update_undo_redo_labels()
+
+    def _begin_document_session(self):
+        self._document_session_id = new_document_session_id()
+        self._pending_redaction_session_id = self._document_session_id
+
+    def _refresh_after_document_replacement(self, preferred_page=0):
+        """Rebuild page and form caches after an atomic in-memory commit."""
+        self.total_pages = self.pdf_document.page_count if self.pdf_document else 0
+        self.current_page = min(max(0, preferred_page), max(0, self.total_pages - 1))
+        self.pages = []
+        self._reload_form_cache()
+        self.load_pages()
+        self.update_view()
+        self.load_thumbnails()
+        self.load_toc()
+        self.refresh_bookmark_list()
+        self.refresh_annotations_panel()
+        self.refresh_forms_panel()
+        self.update_ui_on_page_change()
+        self.page_label.setText(f" / {self.total_pages}")
+
+    def _replace_document_from_snapshot(self, payload, *, preferred_page=None):
+        """Replace the live PDF from validated bytes and rebuild all live caches."""
+        replacement = open_pdf_snapshot(payload)
+        old_document = self.pdf_document
+        self.pdf_document = replacement
+        if old_document is not None and old_document is not replacement:
+            try:
+                old_document.close()
+            except Exception:
+                pass
+        self._requires_full_rewrite = True
+        self._refresh_after_document_replacement(
+            self.current_page if preferred_page is None else preferred_page
+        )
+
     # =========================================================================
     # Recent files
     # =========================================================================
@@ -352,9 +516,25 @@ class PDFReader(PDFReaderUI):
         QApplication.restoreOverrideCursor()
 
         # Open the converted PDF, but present it under the original filename.
-        self._open_pdf_path(pdf_path, display_path=src, skip_unsaved_prompt=True)
+        opened = self._open_pdf_path(
+            pdf_path,
+            display_path=src,
+            skip_unsaved_prompt=True,
+            imported_source_path=src,
+            imported_temp_path=pdf_path,
+        )
+        if not opened:
+            doc_import.cleanup_temporary_import(pdf_path)
 
-    def _open_pdf_path(self, file_name, display_path=None, skip_unsaved_prompt=False):
+    def _open_pdf_path(
+        self,
+        file_name,
+        display_path=None,
+        skip_unsaved_prompt=False,
+        imported_source_path=None,
+        imported_temp_path=None,
+    ):
+        logging.info("Opening document: %s", file_name)
         if (
             self._scan_text_worker is not None
             and self._scan_text_worker.isRunning()
@@ -379,6 +559,8 @@ class PDFReader(PDFReaderUI):
             self._open_office_document(file_name)
             return
 
+        doc = None
+        previous_session = None
         try:
             # ── File size warning for very large documents ────────────────
             try:
@@ -399,6 +581,7 @@ class PDFReader(PDFReaderUI):
             try:
                 doc = fitz.open(file_name)
             except fitz.FileDataError as fde:
+                logging.exception("Corrupted PDF could not be opened: %s", file_name)
                 QMessageBox.critical(
                     self, "Corrupted PDF",
                     f"The file appears to be corrupted and could not be opened.\n\n"
@@ -406,6 +589,7 @@ class PDFReader(PDFReaderUI):
                 self.status_bar.showMessage(f"Error: corrupted PDF – {file_name}")
                 return
             except Exception as exc:
+                logging.exception("PDF open failed: %s", file_name)
                 QMessageBox.critical(self, "Open Error", str(exc))
                 self.status_bar.showMessage(f"Error loading PDF: {exc}")
                 return
@@ -422,36 +606,32 @@ class PDFReader(PDFReaderUI):
                         "Incorrect password. The file could not be opened.")
                     doc.close()
                     return
-            old_document = self.pdf_document
-            self.pdf_document   = doc
-            self.pdf_file_path  = file_name
-            if old_document is not None and old_document is not doc:
-                try:
-                    old_document.close()
-                except Exception:
-                    pass
-            self.total_pages    = self.pdf_document.page_count
-            self.current_page   = 0
-            self.rotation       = 0
-            self.search_results = []
-            self.current_search_index = -1
-            self.active_tool    = TOOL_NONE
-            self.annotation_mode = False
+            # Load file-bound sidecars before replacing the current session.
+            loaded_annotations = load_annotations(doc, file_name)
+            loaded_markup = self._load_markup_strokes(file_name)
+            loaded_bookmarks = load_bookmarks(file_name)
+
+            # Keep the current PDF alive until every new-session cache and UI
+            # step succeeds. A later exception can then restore this session.
+            previous_session = self._capture_open_session()
+            old_document = previous_session["pdf_document"]
+            self._reset_document_session_state()
+            self.pdf_document = doc
+            self.pdf_file_path = file_name
+            self._imported_source_path = imported_source_path
+            self._imported_temp_pdf_path = imported_temp_path
+            self._begin_document_session()
+            self.total_pages = self.pdf_document.page_count
+            self.current_page = 0
+            self.rotation = 0
             self._clear_tool_buttons()
 
-            self.annotations = load_annotations(self.pdf_document, file_name)
-            self.markup_strokes = self._load_markup_strokes(file_name)
-            self._undo_stack.clear()
-            self._form_dirty = False
-            self._form_design_mode = False
-            self._form_design_tool = FORM_TOOL_SELECT
-            self._selected_form_ref = None
+            self.annotations = loaded_annotations
+            self.markup_strokes = loaded_markup
+            self.bookmarks = loaded_bookmarks
             self._clear_form_drag()
             self.clear_form_suggestions(update_view=False)
-            self._scan_text_context = None
-            self._requires_full_rewrite = False
             self._update_undo_redo_labels()
-            self.bookmarks   = load_bookmarks(file_name)
 
             self._reload_form_cache()
 
@@ -475,10 +655,40 @@ class PDFReader(PDFReaderUI):
             self.setWindowTitle(f"{APP_NAME}  –  {os.path.basename(shown)}{suffix}")
             self.status_bar.showMessage(f"Opened: {shown}")
             self._add_to_recent(display_path or file_name)
+
+            # Commit the session only after every cache and UI step succeeded.
+            # The previous document remains live until this point.
+            if old_document is not None and old_document is not doc:
+                try:
+                    old_document.close()
+                except Exception:
+                    logging.exception("Could not close the previous PDF after commit")
+            previous_temp = previous_session.get("imported_temp_pdf_path")
+            if previous_temp and previous_temp != imported_temp_path:
+                if not doc_import.cleanup_temporary_import(previous_temp):
+                    logging.warning(
+                        "Could not remove previous Office conversion cache: %s",
+                        previous_temp,
+                    )
+            logging.info("Document opened successfully: %s", shown)
+            return True
         except Exception as e:
+            logging.exception("Document session initialisation failed: %s", file_name)
+            try:
+                if doc is not None and doc is not (previous_session or {}).get("pdf_document"):
+                    if not doc.is_closed:
+                        doc.close()
+            except Exception:
+                logging.exception("Could not close failed new-document session")
+            if previous_session is not None:
+                try:
+                    self._restore_open_session(previous_session)
+                except Exception:
+                    logging.exception("Could not restore previous document session")
             QMessageBox.critical(self, "Unexpected Error",
                 f"An unexpected error occurred while opening the file:\n\n{e}")
             self.status_bar.showMessage(f"Error loading PDF: {e}")
+            return False
 
     def _enable_all_controls(self):
         for w in [
@@ -524,7 +734,7 @@ class PDFReader(PDFReaderUI):
             w.setEnabled(True)
 
     def show_password_dialog(self):
-        """Open the password protect/remove dialog and apply to save."""
+        """Create a protected/unprotected copy through a staged PDF transaction."""
         if not self.pdf_document:
             return
         is_enc = self.pdf_document.is_encrypted
@@ -532,73 +742,129 @@ class PDFReader(PDFReaderUI):
         if dlg.exec() != dlg.DialogCode.Accepted:
             return
 
-        # Choose save path
         path, _ = QFileDialog.getSaveFileName(
             self, "Save Protected PDF", self.pdf_file_path or "protected.pdf",
             "PDF Files (*.pdf)")
         if not path:
             return
-
-        try:
-            if dlg.remove_password:
-                # Save without encryption
-                self.pdf_document.save(path, encryption=fitz.PDF_ENCRYPT_NONE)
-                self.status_bar.showMessage(
-                    f"Saved without password: {os.path.basename(path)}")
-            else:
-                self.pdf_document.save(
-                    path,
-                    encryption=dlg.encryption,
-                    user_pw=dlg.user_password,
-                    owner_pw=dlg.owner_password,
-                    permissions=dlg.permissions,
-                    garbage=3, deflate=True)
-                self.status_bar.showMessage(
-                    f"Password protected PDF saved: {os.path.basename(path)}")
-            self._add_to_recent(path)
-        except Exception as e:
-            QMessageBox.critical(self, "Save Error", str(e))
-
-    def apply_redactions(self):
-        """Burn all pending redaction boxes into the PDF permanently."""
-        if not self.pdf_document:
+        if not path.lower().endswith(".pdf"):
+            path += ".pdf"
+        if self.pdf_file_path and os.path.abspath(path) == os.path.abspath(self.pdf_file_path):
+            QMessageBox.warning(
+                self,
+                "Choose a Different File",
+                "Password changes are written as a validated new PDF. Choose a "
+                "different filename so the open source remains recoverable.",
+            )
             return
+
+        clone = None
+        try:
+            self._autosave_form_data()
+            clone = clone_pdf_document(self.pdf_document)
+            self._prepare_document_for_save(
+                clone, autosave_forms=False, mark_baked=False)
+            if dlg.remove_password:
+                save_kwargs = {
+                    "encryption": fitz.PDF_ENCRYPT_NONE,
+                    "garbage": 4,
+                    "deflate": True,
+                }
+                validation_password = None
+                success_text = f"Saved without password: {os.path.basename(path)}"
+            else:
+                save_kwargs = {
+                    "encryption": dlg.encryption,
+                    "user_pw": dlg.user_password,
+                    "owner_pw": dlg.owner_password,
+                    "permissions": dlg.permissions,
+                    "garbage": 4,
+                    "deflate": True,
+                }
+                validation_password = dlg.user_password or dlg.owner_password
+                success_text = (
+                    f"Password protected PDF saved: {os.path.basename(path)}")
+
+            save_pdf_atomic(
+                clone,
+                path,
+                save_kwargs=save_kwargs,
+                validator=lambda staged: validate_pdf_file(
+                    staged,
+                    expected_pages=clone.page_count,
+                    password=validation_password,
+                ),
+            )
+            self.status_bar.showMessage(success_text)
+            self._add_to_recent(path)
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                "Save Error",
+                "The protected copy could not be completed. Any existing "
+                f"destination was preserved.\n\n{type(exc).__name__}: {exc}",
+            )
+        finally:
+            if clone is not None:
+                clone.close()
+
+    def apply_redactions(self, *, confirm=True):
+        """Apply all pending boxes to a validated clone, then commit atomically."""
+        if not self.pdf_document:
+            return False
         total_boxes = sum(len(v) for v in self.pending_redactions.values())
         if total_boxes == 0:
             self.status_bar.showMessage(
                 "No redactions pending. Use the Redact tool to draw boxes first.")
-            return
+            return False
 
-        reply = QMessageBox.warning(
-            self, "Apply Redactions",
-            f"This will permanently black out {total_boxes} area(s) "
-            f"across {len(self.pending_redactions)} page(s).\n\n"
-            f"This action CANNOT be undone.\n\nContinue?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No)
-        if reply != QMessageBox.StandardButton.Yes:
-            return
+        if confirm:
+            reply = QMessageBox.warning(
+                self, "Apply Redactions",
+                f"This will permanently black out {total_boxes} area(s) "
+                f"across {len(self.pending_redactions)} page(s).\n\n"
+                f"This action CANNOT be undone.\n\nContinue?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No)
+            if reply != QMessageBox.StandardButton.Yes:
+                return False
 
+        preferred_page = self.current_page
         try:
-            for page_num, rects in self.pending_redactions.items():
-                page = self.pdf_document.load_page(page_num)
-                for r in rects:
-                    annot = page.add_redact_annot(r)
-                    annot.set_colors(fill=(0, 0, 0))
-                    annot.update()
-                page.apply_redactions()
-            self.pending_redactions.clear()
-            self.active_tool = TOOL_NONE
-            self._requires_full_rewrite = True
-            self._mark_modified()
-            self._sync_tool_buttons()
-            self._update_cursor()
-            self.update_view()
-            self.refresh_annotations_panel()
-            self.status_bar.showMessage(
-                "Redactions applied. Save As is required for a clean full rewrite.")
-        except Exception as e:
-            self.status_bar.showMessage(f"Redaction error: {e}")
+            staged = apply_redactions_transactionally(
+                self.pdf_document,
+                self.pending_redactions,
+                redaction_session_id=self._pending_redaction_session_id,
+                active_session_id=self._document_session_id,
+            )
+        except Exception as exc:
+            logging.exception("Transactional redaction failed")
+            QMessageBox.critical(
+                self,
+                "Redaction Error",
+                "No page was changed because the complete redaction transaction "
+                f"could not be validated.\n\n{type(exc).__name__}: {exc}",
+            )
+            self.status_bar.showMessage(f"Redaction transaction rejected: {exc}")
+            return False
+
+        old_document = self.pdf_document
+        self.pdf_document = staged
+        try:
+            old_document.close()
+        except Exception:
+            pass
+        self.pending_redactions.clear()
+        self._pending_redaction_session_id = self._document_session_id
+        self.active_tool = TOOL_NONE
+        self._requires_full_rewrite = True
+        self._mark_modified()
+        self._sync_tool_buttons()
+        self._update_cursor()
+        self._refresh_after_document_replacement(preferred_page)
+        self.status_bar.showMessage(
+            "Redactions applied transactionally. Save As is required for a clean full rewrite.")
+        return True
 
     def _mark_modified(self):
         """Put an asterisk in the title bar when there are unsaved changes."""
@@ -621,6 +887,28 @@ class PDFReader(PDFReaderUI):
         """Ask what to do with unsaved changes. Return True to proceed."""
         if not self._has_unsaved_changes():
             return True
+        if self.pending_redactions:
+            count = sum(len(items) for items in self.pending_redactions.values())
+            reply = QMessageBox.warning(
+                self,
+                "Unapplied Redactions",
+                f"This document has {count} unapplied redaction box(es).\n\n"
+                "Choose Save to apply them transactionally and save a new PDF. "
+                "Choose Discard to abandon all unsaved changes, or Cancel to stay "
+                f"in the document before you {action}.",
+                QMessageBox.StandardButton.Save
+                | QMessageBox.StandardButton.Discard
+                | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Cancel,
+            )
+            if reply == QMessageBox.StandardButton.Cancel:
+                return False
+            if reply == QMessageBox.StandardButton.Discard:
+                return True
+            if not self.apply_redactions(confirm=False):
+                return False
+            return bool(self.save_pdf_as())
+
         reply = QMessageBox.warning(
             self, "Unsaved Changes",
             f"This document has unsaved changes. Save them before you {action}?",
@@ -636,9 +924,18 @@ class PDFReader(PDFReaderUI):
         return bool(self.save_pdf())
 
     def save_pdf(self):
-        """Save the active PDF, forcing Save As after permanent removals."""
+        """Save the active PDF, forcing Save As for non-owned or rewritten data."""
         if not self.pdf_document:
             return False
+        if self._imported_source_path:
+            QMessageBox.information(
+                self,
+                "Save Imported Document As PDF",
+                "This document was converted from an Office file. The open PDF "
+                "is a temporary conversion cache, not a user-owned destination.\n\n"
+                "Choose where to save the edited PDF.",
+            )
+            return self.save_pdf_as()
         if self._requires_full_rewrite:
             QMessageBox.information(
                 self,
@@ -657,8 +954,14 @@ class PDFReader(PDFReaderUI):
         """Save to a new PDF, reopen that copy, and continue editing it."""
         if not self.pdf_document:
             return False
-        default_path = self.pdf_file_path or "document.pdf"
-        if self._requires_full_rewrite and self.pdf_file_path:
+        if self._imported_source_path:
+            import doc_import
+            default_path = doc_import.imported_pdf_default_path(
+                self._imported_source_path
+            )
+        else:
+            default_path = self.pdf_file_path or "document.pdf"
+        if self._requires_full_rewrite and self.pdf_file_path and not self._imported_source_path:
             base, ext = os.path.splitext(self.pdf_file_path)
             default_path = base + "_edited" + (ext or ".pdf")
         file_name, _ = QFileDialog.getSaveFileName(
@@ -667,6 +970,23 @@ class PDFReader(PDFReaderUI):
             return False
         if not file_name.lower().endswith(".pdf"):
             file_name += ".pdf"
+
+        if self.pending_redactions:
+            decision = self._prompt_pending_redactions_for_save_as()
+            if decision == "cancel":
+                return False
+            if decision == "apply":
+                if not self.apply_redactions(confirm=False):
+                    return False
+            elif decision == "discard":
+                self.pending_redactions.clear()
+                self._pending_redaction_session_id = self._document_session_id
+                self.active_tool = TOOL_NONE
+                self._sync_tool_buttons()
+                self._update_cursor()
+                self.refresh_annotations_panel()
+                self.update_view()
+
         if (
             self._requires_full_rewrite
             and self.pdf_file_path
@@ -685,19 +1005,58 @@ class PDFReader(PDFReaderUI):
             return False
 
         # Reopen the new file so later Ctrl+S correctly saves incrementally to it.
-        self._open_pdf_path(file_name, skip_unsaved_prompt=True)
+        if not self._open_pdf_path(file_name, skip_unsaved_prompt=True):
+            return False
         if self.pdf_document and self.total_pages:
             self.current_page = min(old_page, self.total_pages - 1)
             self.update_ui_on_page_change()
         return True
 
-    def _prepare_document_for_save(self):
-        """Flush forms and convert pending app-level markup into PDF objects."""
-        self._autosave_form_data()
+    def _prompt_pending_redactions_for_save_as(self):
+        """Require an explicit decision before Save As can clear redaction boxes."""
+        count = sum(len(items) for items in self.pending_redactions.values())
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle("Unapplied Redactions")
+        box.setText(
+            f"This document has {count} unapplied redaction box(es)."
+        )
+        box.setInformativeText(
+            "Save As cannot silently carry pending destructive state into a "
+            "new document session. Choose whether to apply the redactions, "
+            "save without them, or cancel."
+        )
+        apply_button = box.addButton(
+            "Apply Redactions and Save", QMessageBox.ButtonRole.AcceptRole
+        )
+        discard_button = box.addButton(
+            "Save Without Redactions", QMessageBox.ButtonRole.DestructiveRole
+        )
+        cancel_button = box.addButton(QMessageBox.StandardButton.Cancel)
+        box.setDefaultButton(cancel_button)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is apply_button:
+            return "apply"
+        if clicked is discard_button:
+            return "discard"
+        return "cancel"
 
-        # Bake sticky-note annotations.
+    def _prepare_document_for_save(
+            self, document=None, *, autosave_forms=True, mark_baked=True):
+        """Flush app-level markup into ``document`` without duplicating images."""
+        target = document or self.pdf_document
+        if target is None:
+            raise RuntimeError("No PDF is available for save preparation.")
+        if autosave_forms:
+            self._autosave_form_data()
+
         for pn, items in self.annotations.items():
-            page = self.pdf_document.load_page(pn)
+            if not (0 <= int(pn) < target.page_count):
+                raise RuntimeError(
+                    f"Sticky-note state references missing page {int(pn) + 1}."
+                )
+            page = target.load_page(int(pn))
             existing_positions = set()
             for annot in page.annots() or []:
                 if annot.type[0] == 8:
@@ -709,13 +1068,18 @@ class PDFReader(PDFReaderUI):
                     annot.set_colors(stroke=(1, 0.6, 0))
                     annot.update()
 
-        # Bake markup strokes (highlight / underline / strikethrough / ink).
+        # Signature images and stamps use immediate PDF persistence and are not
+        # replayed from the sidecar during save preparation.
         for pn, strokes in self.markup_strokes.items():
-            page = self.pdf_document.load_page(pn)
+            if not (0 <= int(pn) < target.page_count):
+                raise RuntimeError(
+                    f"Markup state references missing page {int(pn) + 1}."
+                )
+            page = target.load_page(int(pn))
             for stroke in strokes:
                 if stroke.get("baked"):
                     continue
-                stype = stroke["type"]
+                stype = stroke.get("type")
                 rects = [fitz.Rect(r) for r in stroke.get("rects", [])]
                 color = stroke.get("color", [1, 1, 0])
                 if stype == "highlight" and rects:
@@ -738,67 +1102,179 @@ class PDFReader(PDFReaderUI):
                         annot.set_colors(stroke=color)
                         annot.set_border(width=stroke.get("width", 2))
                         annot.update()
-                elif stype == "signature":
-                    image_bytes = stroke.get("image_bytes")
-                    rect = fitz.Rect(stroke.get("rect", [0, 0, 100, 50]))
-                    if image_bytes:
-                        page.insert_image(rect, stream=image_bytes)
-                stroke["baked"] = True
+                if mark_baked:
+                    stroke["baked"] = True
 
     def _do_save(self, path, sidecar_path=None):
-        """Save safely, including form values, and return success."""
+        """Atomically commit the PDF and every application sidecar as one bundle."""
         if not self.pdf_document:
             return False
         path = os.path.abspath(path)
         sidecar_path = os.path.abspath(sidecar_path or path)
+        document_name = (
+            os.path.abspath(self.pdf_document.name)
+            if getattr(self.pdf_document, "name", None)
+            else ""
+        )
+        same_file = bool(document_name and document_name == path)
+        replaces_active_stream = bool(
+            same_file
+            or (
+                self.pdf_file_path
+                and os.path.abspath(self.pdf_file_path) == path
+            )
+        )
+        if same_file and self._requires_full_rewrite:
+            QMessageBox.warning(
+                self,
+                "Save As Required",
+                "A clean full rewrite cannot replace the currently open source "
+                "incrementally. Choose Save As and a new filename.",
+            )
+            return False
+
+        preferred_page = self.current_page
+        staged_document = None
+        replacement = None
+        staged_operations = []
+        active_snapshot = None
+        active_document_closed = False
+        committed = False
         try:
-            self._prepare_document_for_save()
+            # Flush live form controls before cloning. All deferred annotations
+            # are then prepared only on the independent staged document.
+            self._autosave_form_data()
+            if replaces_active_stream:
+                active_snapshot = snapshot_pdf_bytes(self.pdf_document)
+            staged_document = clone_pdf_document(self.pdf_document)
+            self._prepare_document_for_save(
+                staged_document, autosave_forms=False, mark_baked=False
+            )
+            new_annotations, new_markup = retire_baked_sidecar_state(
+                self.annotations, self.markup_strokes
+            )
+            if replaces_active_stream:
+                replacement = clone_pdf_document(staged_document)
 
-            document_name = os.path.abspath(self.pdf_document.name) \
-                if getattr(self.pdf_document, "name", None) else ""
-            same_file = bool(document_name and document_name == path)
-
-            requires_full_rewrite = bool(self._requires_full_rewrite)
-            if same_file:
-                if requires_full_rewrite:
-                    raise RuntimeError(
-                        "A clean full rewrite must be saved under a new filename."
-                    )
-                # Incremental save is the only legal direct save to an open PDF.
-                self.pdf_document.saveIncr()
-            else:
-                self.pdf_document.save(
-                    path,
-                    garbage=4 if requires_full_rewrite else 3,
-                    clean=requires_full_rewrite,
+            with sibling_staged_path(path) as staged_pdf:
+                staged_document.save(
+                    str(staged_pdf),
+                    garbage=4 if self._requires_full_rewrite else 3,
+                    clean=bool(self._requires_full_rewrite),
                     deflate=True,
                     encryption=fitz.PDF_ENCRYPT_KEEP,
                 )
+                validate_pdf_file(
+                    staged_pdf, expected_pages=staged_document.page_count
+                )
+                staged_operations = [
+                    StagedOperation(Path(path), Path(staged_pdf))
+                ]
+                staged_operations.append(
+                    stage_json_payload(
+                        sidecar_path + ".annotations.json", new_annotations
+                    )
+                )
+                staged_operations.append(
+                    stage_json_payload(
+                        self._markup_path(sidecar_path), new_markup
+                    )
+                )
+                staged_operations.append(
+                    stage_json_payload(
+                        sidecar_path + ".bookmarks.json", self.bookmarks
+                    )
+                )
 
-            # Sidecar files must follow Save As rather than remaining beside the old PDF.
-            old_path = self.pdf_file_path
-            self.pdf_file_path = sidecar_path
-            try:
-                save_annotations(self)
-                self._save_markup_strokes(sidecar_path)
-                save_bookmarks(self)
-            finally:
-                self.pdf_file_path = old_path
+                # Windows may deny atomic replacement while the source PDF is
+                # still open. A validated in-memory snapshot and replacement
+                # are already available, so release the source handle only at
+                # the final commit boundary.
+                if replaces_active_stream and self.pdf_document is not None:
+                    self.pdf_document.close()
+                    self.pdf_document = None
+                    active_document_closed = True
+                commit_staged_operations(staged_operations)
+                committed = True
 
-            self._form_dirty = False
-            if not same_file:
+            # Only after the complete bundle commits may the live authority and
+            # dirty state advance. Save As targets are opened transactionally
+            # afterwards, so the old session remains untouched until that open
+            # succeeds; a failed reopen can therefore restore every pending edit.
+            if replaces_active_stream:
+                self.annotations = new_annotations
+                self.markup_strokes = new_markup
+                if replacement is not None:
+                    old_document = self.pdf_document
+                    self.pdf_document = replacement
+                    replacement = None
+                    if old_document is not None:
+                        try:
+                            old_document.close()
+                        except Exception:
+                            logging.exception(
+                                "Could not close the pre-save PDF handle"
+                            )
+                    active_document_closed = False
+                self._form_dirty = False
                 self._requires_full_rewrite = False
-            self._clear_modified()
-            self.refresh_forms_panel()
-            self.status_bar.showMessage(f"Saved: {path}")
+                self._clear_modified()
+                if self.pending_redactions:
+                    self._mark_modified()
+                    self.status_bar.showMessage(
+                        f"Saved: {path}. Unapplied redaction boxes remain pending."
+                    )
+                else:
+                    self.status_bar.showMessage(f"Saved: {path}")
+            else:
+                self.status_bar.showMessage(
+                    f"Saved new PDF: {path}. Opening the saved document..."
+                )
+            logging.info("PDF and sidecars saved successfully: %s", path)
+
+            try:
+                if replaces_active_stream:
+                    self._refresh_after_document_replacement(preferred_page)
+            except Exception:
+                # The durable save has completed; a display refresh failure must
+                # not be misreported as an unsuccessful file transaction.
+                logging.exception("Post-save UI refresh failed")
             return True
         except Exception as exc:
+            logging.exception("PDF save bundle failed: %s", path)
+            if active_document_closed and active_snapshot is not None:
+                try:
+                    self.pdf_document = open_pdf_snapshot(active_snapshot)
+                    active_document_closed = False
+                    self._refresh_after_document_replacement(preferred_page)
+                except Exception:
+                    logging.exception(
+                        "Could not restore the active PDF after save rollback"
+                    )
+            self._mark_modified()
+            message = (
+                "The PDF and its application sidecars could not be committed as "
+                "one save transaction. Existing destination files were "
+                "preserved and the document remains unsaved."
+            )
+            if committed:
+                message = (
+                    "The file data was committed, but a later application error "
+                    "occurred. Review the diagnostics log before continuing."
+                )
             QMessageBox.critical(
-                self, "Save Error",
-                f"The PDF could not be saved. Your open document remains available.\n\n"
-                f"{type(exc).__name__}: {exc}")
+                self,
+                "Save Error",
+                f"{message}\n\n{type(exc).__name__}: {exc}",
+            )
             self.status_bar.showMessage(f"Save error: {exc}")
             return False
+        finally:
+            cleanup_staged_operations(staged_operations)
+            if replacement is not None:
+                replacement.close()
+            if staged_document is not None:
+                staged_document.close()
 
     # =========================================================================
     # Markup stroke persistence (sidebar JSON file, separate from annotations)
@@ -808,24 +1284,39 @@ class PDFReader(PDFReaderUI):
         return pdf_path + ".markup.json"
 
     def _load_markup_strokes(self, pdf_path):
+        """Load only deferred markup not already represented natively."""
         mp = self._markup_path(pdf_path)
-        if os.path.exists(mp):
-            try:
-                with open(mp) as f:
-                    raw = json.load(f)
-                return {int(k): v for k, v in raw.items()}
-            except (OSError, ValueError, KeyError) as e:
-                import logging
-                logging.warning("_load_markup_strokes: could not read '%s': %s", mp, e)
-        return {}
+        if not os.path.exists(mp):
+            return {}
+        try:
+            with open(mp, encoding="utf-8") as handle:
+                raw = json.load(handle)
+            return pending_markup_only(raw)
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            import logging
+            logging.warning(
+                "_load_markup_strokes: could not read '%s': %s", mp, exc
+            )
+            return {}
 
     def _save_markup_strokes(self, pdf_path):
+        """Atomically persist deferred markup only."""
         mp = self._markup_path(pdf_path)
         try:
-            with open(mp, "w") as f:
-                json.dump(self.markup_strokes, f)
-        except OSError as e:
-            self.status_bar.showMessage(f"Warning: could not save markup strokes: {e}")
+            atomic_write_json(mp, pending_markup_only(self.markup_strokes))
+        except OSError as exc:
+            self.status_bar.showMessage(
+                f"Warning: could not save markup strokes: {exc}"
+            )
+            raise
+
+    def _retire_baked_annotation_state(self):
+        """Switch successfully saved annotations to the native PDF authority."""
+        self.annotations, self.markup_strokes = retire_baked_sidecar_state(
+            self.annotations,
+            self.markup_strokes,
+        )
+
 
     # =========================================================================
     # Active tool management
@@ -985,15 +1476,44 @@ class PDFReader(PDFReaderUI):
         img_bytes = bytes(buf.data())
         buf.close()
 
-        self.markup_strokes.setdefault(page_num, []).append({
-            "type":        "signature",
-            "rect":        list(pdf_rect),
-            "image_bytes": list(img_bytes),
-        })
-
-        page.insert_image(pdf_rect, stream=img_bytes)
+        before_snapshot = snapshot_pdf_bytes(self.pdf_document)
+        try:
+            insert_signature_image_once(
+                self.pdf_document,
+                page_number=page_num,
+                rect=pdf_rect,
+                image_bytes=img_bytes,
+            )
+            after_snapshot = snapshot_pdf_bytes(self.pdf_document)
+        except Exception as exc:
+            # A failed immediate insertion must not leave a partial native edit.
+            try:
+                self._replace_document_from_snapshot(
+                    before_snapshot, preferred_page=page_num
+                )
+            except Exception:
+                pass
+            QMessageBox.critical(
+                self, "Signature Error",
+                f"The signature could not be placed.\n\n{type(exc).__name__}: {exc}")
+            return
+        self._undo_stack.push(Command(
+            kind="native_document_change",
+            undo_data={
+                "pdf_bytes": before_snapshot,
+                "page": page_num,
+                "label": "Signature",
+            },
+            redo_data={
+                "pdf_bytes": after_snapshot,
+                "page": page_num,
+                "label": "Signature",
+            },
+        ))
+        self._update_undo_redo_labels()
+        self._mark_modified()
         self.render_page_content(page_num, page_widget)
-        self.status_bar.showMessage("Signature placed. Save to embed permanently.")
+        self.status_bar.showMessage("Signature placed once. Save to persist it.")
 
     @staticmethod
     def _first_image_url(mime):
@@ -1068,14 +1588,43 @@ class PDFReader(PDFReaderUI):
         except ValueError:
             return
         pdf_pt = fitz.Point(click_x, click_y) * inv
-        page   = self.pdf_document.load_page(page_num)
-        rect   = fitz.Rect(pdf_pt.x - 80, pdf_pt.y - 20,
-                           pdf_pt.x + 80, pdf_pt.y + 20)
-        page.draw_rect(rect, color=(0.8, 0.1, 0.1), width=2)
-        page.insert_text(
-            fitz.Point(pdf_pt.x - 70, pdf_pt.y + 8),
-            text, fontsize=16, color=(0.8, 0.1, 0.1))
+        before_snapshot = snapshot_pdf_bytes(self.pdf_document)
+        try:
+            page = self.pdf_document.load_page(page_num)
+            rect = fitz.Rect(pdf_pt.x - 80, pdf_pt.y - 20,
+                             pdf_pt.x + 80, pdf_pt.y + 20)
+            page.draw_rect(rect, color=(0.8, 0.1, 0.1), width=2)
+            page.insert_text(
+                fitz.Point(pdf_pt.x - 70, pdf_pt.y + 8),
+                text, fontsize=16, color=(0.8, 0.1, 0.1))
+            after_snapshot = snapshot_pdf_bytes(self.pdf_document)
+        except Exception as exc:
+            try:
+                self._replace_document_from_snapshot(
+                    before_snapshot, preferred_page=page_num
+                )
+            except Exception:
+                pass
+            QMessageBox.critical(
+                self, "Stamp Error",
+                f"The stamp could not be placed.\n\n{type(exc).__name__}: {exc}")
+            return
         self._pending_stamp = None
+        self._undo_stack.push(Command(
+            kind="native_document_change",
+            undo_data={
+                "pdf_bytes": before_snapshot,
+                "page": page_num,
+                "label": "Stamp",
+            },
+            redo_data={
+                "pdf_bytes": after_snapshot,
+                "page": page_num,
+                "label": "Stamp",
+            },
+        ))
+        self._update_undo_redo_labels()
+        self._mark_modified()
         for w in self.page_widgets:
             w.setCursor(QCursor(Qt.CursorShape.ArrowCursor))
         self.render_page_content(page_num, page_widget)
@@ -1096,7 +1645,7 @@ class PDFReader(PDFReaderUI):
             self.bookmarks.append({"page": self.current_page, "label": label})
             self.bookmarks.sort(key=lambda b: b["page"])
             self.refresh_bookmark_list()
-            save_bookmarks(self)
+            self._mark_modified()
             self.status_bar.showMessage(f"Bookmark added: {label}")
 
     def remove_bookmark(self):
@@ -1105,7 +1654,7 @@ class PDFReader(PDFReaderUI):
             return
         removed = self.bookmarks.pop(row)
         self.refresh_bookmark_list()
-        save_bookmarks(self)
+        self._mark_modified()
         self.status_bar.showMessage(f"Bookmark removed: {removed['label']}")
 
     def goto_bookmark(self, item):
@@ -2528,45 +3077,26 @@ class PDFReader(PDFReaderUI):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        self._prepare_document_for_save()
-        clone = None
         try:
-            clone = fitz.open()
-            clone.insert_pdf(
-                self.pdf_document, annots=True, widgets=True,
-                join_duplicates=True)
-            clone.bake(annots=False, widgets=True)
-            clone.save(output_path, garbage=4, deflate=True)
-            clone.close()
-            clone = None
-
-            check = fitz.open(output_path)
-            remaining = sum(len(list(page.widgets() or [])) for page in check)
-            check.close()
-            if remaining:
-                raise RuntimeError(
-                    f"Flatten verification failed: {remaining} interactive "
-                    "field(s) remain in the output.")
-
+            self._autosave_form_data()
+            flattened_count = flatten_form_atomic(
+                self.pdf_document,
+                output_path,
+                prepare_clone=lambda clone: self._prepare_document_for_save(
+                    clone, autosave_forms=False, mark_baked=False),
+            )
             QMessageBox.information(
                 self, "Flattened Copy Created",
-                f"Created a non-editable filled copy with {count} field(s) baked "
+                f"Created a non-editable filled copy with {flattened_count} field(s) baked "
                 f"into the pages:\n\n{output_path}\n\n"
                 "The original remains editable.")
             self.status_bar.showMessage(f"Flattened form copy saved: {output_path}")
         except Exception as exc:
             QMessageBox.critical(
                 self, "Flatten Form Error",
-                "The flattened copy could not be created. The original was not "
-                f"changed.\n\n{type(exc).__name__}: {exc}")
-            try:
-                if output_path and os.path.exists(output_path):
-                    os.remove(output_path)
-            except OSError:
-                pass
-        finally:
-            if clone is not None:
-                clone.close()
+                "The flattened copy could not be created. The existing destination "
+                "and the open original were preserved.\n\n"
+                f"{type(exc).__name__}: {exc}")
 
     # =========================================================================
     # OCR-assisted scanned-text replacement
@@ -2903,7 +3433,7 @@ class PDFReader(PDFReaderUI):
                         undo_data={"page": page_num, "item": item},
                     ))
                     self._update_undo_redo_labels()
-                    save_annotations(self)
+                    self._mark_modified()
                     self.render_page_content(page_num, page_widget)
                     self.status_bar.showMessage("Sticky note added.")
             return
@@ -3023,6 +3553,7 @@ class PDFReader(PDFReaderUI):
                     undo_data={"page": page_num, "stroke": stroke_fh},
                 ))
                 self._update_undo_redo_labels()
+                self._mark_modified()
             self._freehand_points = []
             self._freehand_page   = -1
             self.render_page_content(page_num, page_widget)
@@ -3107,7 +3638,18 @@ class PDFReader(PDFReaderUI):
                 pdf_rect = self._widget_coords_to_pdf_rect(
                     page_widget, self.selection_start_point, self.selection_end_point)
                 if pdf_rect:
+                    if self._pending_redaction_session_id != self._document_session_id:
+                        self.pending_redactions.clear()
+                        self._pending_redaction_session_id = self._document_session_id
                     self.pending_redactions.setdefault(page_num, []).append(pdf_rect)
+                    rect_values = tuple(pdf_rect)
+                    self._undo_stack.push(Command(
+                        kind="redaction_add",
+                        undo_data={"page": page_num, "rect": rect_values},
+                        redo_data={"page": page_num, "rect": rect_values},
+                    ))
+                    self._update_undo_redo_labels()
+                    self._mark_modified()
                     self.status_bar.showMessage(
                         f"Redaction box added on page {page_num + 1}. "
                         f"Use Tools → Apply Redactions to burn in.")
@@ -3187,6 +3729,7 @@ class PDFReader(PDFReaderUI):
             undo_data={"page": page_num, "stroke": stroke},
         ))
         self._update_undo_redo_labels()
+        self._mark_modified()
         self.render_page_content(page_num, page_widget)
         self.refresh_annotations_panel()
         self.status_bar.showMessage(
@@ -3586,47 +4129,91 @@ class PDFReader(PDFReaderUI):
                 self.scroll_to_page(page)
 
     def _annot_panel_delete(self, data: dict):
-        """Remove an annotation entry from its backing store."""
+        """Remove an annotation from its single authoritative backing store."""
         source = data.get("source")
-        page   = data.get("page", -1)
+        page = int(data.get("page", -1))
+        changed = False
 
         if source == "note":
             x, y = data.get("x"), data.get("y")
-            if page in self.annotations:
-                self.annotations[page] = [
-                    (ax, ay, t) for ax, ay, t in self.annotations[page]
-                    if not (abs(ax - x) < 1 and abs(ay - y) < 1)]
-                if not self.annotations[page]:
-                    del self.annotations[page]
-                save_annotations(self)
+            items = self.annotations.get(page, [])
+            removed_item = next(
+                (
+                    item for item in items
+                    if abs(item[0] - x) < 1 and abs(item[1] - y) < 1
+                ),
+                None,
+            )
+            if removed_item is not None:
+                items.remove(removed_item)
+                if not items:
+                    self.annotations.pop(page, None)
+                self._undo_stack.push(Command(
+                    kind="annotation_remove",
+                    undo_data={"page": page, "item": removed_item},
+                    redo_data={"page": page, "item": removed_item},
+                ))
+                changed = True
 
         elif source == "markup":
-            idx = data.get("stroke_idx")
-            if page in self.markup_strokes and idx is not None:
-                strokes = self.markup_strokes[page]
-                if 0 <= idx < len(strokes):
-                    strokes.pop(idx)
+            index = data.get("stroke_idx")
+            strokes = self.markup_strokes.get(page, [])
+            if index is not None and 0 <= int(index) < len(strokes):
+                removed_stroke = strokes.pop(int(index))
+                if not strokes:
+                    self.markup_strokes.pop(page, None)
+                self._undo_stack.push(Command(
+                    kind="markup_remove",
+                    undo_data={"page": page, "stroke": removed_stroke},
+                    redo_data={"page": page, "stroke": removed_stroke},
+                ))
+                changed = True
 
         elif source == "redaction":
-            ridx = data.get("rect_idx")
-            if page in self.pending_redactions and ridx is not None:
-                rects = self.pending_redactions[page]
-                if 0 <= ridx < len(rects):
-                    rects.pop(ridx)
-                if not self.pending_redactions[page]:
-                    del self.pending_redactions[page]
+            index = data.get("rect_idx")
+            rects = self.pending_redactions.get(page, [])
+            if index is not None and 0 <= int(index) < len(rects):
+                removed_rect = tuple(rects.pop(int(index)))
+                if not rects:
+                    self.pending_redactions.pop(page, None)
+                self._undo_stack.push(Command(
+                    kind="redaction_remove",
+                    undo_data={"page": page, "rect": removed_rect},
+                    redo_data={"page": page, "rect": removed_rect},
+                ))
+                changed = True
 
         elif source == "pdf":
             xref = data.get("annot_xref")
-            if xref and self.pdf_document:
-                p = self.pdf_document.load_page(page)
-                for annot in p.annots() or []:
-                    if annot.xref == xref:
-                        p.delete_annot(annot)
-                        self._mark_modified()
+            if xref and self.pdf_document and 0 <= page < self.total_pages:
+                before_snapshot = snapshot_pdf_bytes(self.pdf_document)
+                pdf_page = self.pdf_document.load_page(page)
+                for annotation in pdf_page.annots() or []:
+                    if annotation.xref == xref:
+                        pdf_page.delete_annot(annotation)
+                        after_snapshot = snapshot_pdf_bytes(self.pdf_document)
+                        self._undo_stack.push(Command(
+                            kind="native_document_change",
+                            undo_data={
+                                "pdf_bytes": before_snapshot,
+                                "page": page,
+                                "label": "Annotation deletion",
+                            },
+                            redo_data={
+                                "pdf_bytes": after_snapshot,
+                                "page": page,
+                                "label": "Annotation deletion",
+                            },
+                        ))
+                        changed = True
                         break
 
-        # Re-render and refresh panel
+        if not changed:
+            self.status_bar.showMessage("Annotation was already removed.")
+            return
+
+        self._mark_modified()
+        self._update_undo_redo_labels()
         if 0 <= page < len(self.page_widgets):
             self.render_page_content(page, self.page_widgets[page])
         self.refresh_annotations_panel()
@@ -3968,6 +4555,11 @@ class PDFReader(PDFReaderUI):
             except Exception:
                 pass
             self.pdf_document = None
+        if self._imported_temp_pdf_path:
+            import doc_import
+            doc_import.cleanup_temporary_import(self._imported_temp_pdf_path)
+            self._imported_temp_pdf_path = None
+            self._imported_source_path = None
         event.accept()
 
     # =========================================================================
@@ -3975,7 +4567,7 @@ class PDFReader(PDFReaderUI):
     # =========================================================================
 
     def save_a_copy(self):
-        """Save a complete copy without changing the active document path."""
+        """Save a validated staged copy without mutating the active document."""
         if not self.pdf_document:
             return False
         default = self.pdf_file_path or "copy.pdf"
@@ -3993,20 +4585,37 @@ class PDFReader(PDFReaderUI):
                 "Save a Copy cannot replace the document currently open. "
                 "Choose a different filename.")
             return False
+
+        clone = None
         try:
-            self._prepare_document_for_save()
-            self.pdf_document.save(
+            self._autosave_form_data()
+            clone = clone_pdf_document(self.pdf_document)
+            self._prepare_document_for_save(
+                clone, autosave_forms=False, mark_baked=False)
+            save_pdf_atomic(
+                clone,
                 file_name,
-                garbage=4 if self._requires_full_rewrite else 3,
-                clean=bool(self._requires_full_rewrite),
-                deflate=True,
-                encryption=fitz.PDF_ENCRYPT_KEEP,
+                save_kwargs={
+                    "garbage": 4 if self._requires_full_rewrite else 3,
+                    "clean": bool(self._requires_full_rewrite),
+                    "deflate": True,
+                    "encryption": fitz.PDF_ENCRYPT_KEEP,
+                },
             )
             self.status_bar.showMessage(f"Copy saved: {file_name}")
             return True
         except Exception as exc:
-            QMessageBox.critical(self, "Save Copy Error", str(exc))
+            logging.exception("Save a Copy failed: %s", file_name)
+            QMessageBox.critical(
+                self,
+                "Save Copy Error",
+                "The copy could not be completed. Any existing destination was "
+                f"preserved.\n\n{type(exc).__name__}: {exc}",
+            )
             return False
+        finally:
+            if clone is not None:
+                clone.close()
 
     # =========================================================================
     # Undo / Redo  (Phase 0 – annotation & markup; Phase 2 – page ops)
@@ -4069,6 +4678,41 @@ class PDFReader(PDFReaderUI):
             msg = "Annotation undone." if direction == "undo" else "Annotation redone."
             self._finish_markup_undo(page_num, msg)
 
+        elif kind in ("redaction_add", "redaction_remove"):
+            page_num = int(data["page"])
+            rect = fitz.Rect(data["rect"])
+            rects = self.pending_redactions.setdefault(page_num, [])
+            remove = (
+                (kind == "redaction_add" and direction == "undo")
+                or (kind == "redaction_remove" and direction == "redo")
+            )
+            if remove:
+                for index, existing in enumerate(rects):
+                    if fitz.Rect(existing) == rect:
+                        rects.pop(index)
+                        break
+                if not rects:
+                    self.pending_redactions.pop(page_num, None)
+            else:
+                rects.append(rect)
+            self._pending_redaction_session_id = self._document_session_id
+            self._finish_markup_undo(
+                page_num,
+                "Redaction box undone." if direction == "undo"
+                else "Redaction box redone.",
+            )
+
+        elif kind == "native_document_change":
+            page_num = int(data.get("page", self.current_page))
+            label = str(data.get("label", "Native PDF change"))
+            self._replace_document_from_snapshot(
+                data["pdf_bytes"], preferred_page=page_num
+            )
+            self._mark_modified()
+            self.status_bar.showMessage(
+                f"{label} {'undone' if direction == 'undo' else 'redone'}."
+            )
+
         elif kind == "scan_text_overlay":
             if direction == "undo":
                 page_num = int(data["page"])
@@ -4107,22 +4751,35 @@ class PDFReader(PDFReaderUI):
                 if self.pdf_document:
                     self.pdf_document.insert_page(page_num)
                     self.total_pages += 1
+            if data.get("state") is not None:
+                restore_page_bound_state(self, data["state"])
             self._finish_page_op("Page insert undone." if direction == "undo" else "Page insert redone.")
 
         elif kind == "page_remove":
-            page_num  = data["page"]
+            page_num = data["page"]
             page_bytes = data.get("page_bytes")
             if direction == "undo" and page_bytes and self.pdf_document:
-                # Re-insert from saved bytes
                 tmp = fitz.open(stream=page_bytes, filetype="pdf")
-                self.pdf_document.insert_pdf(tmp, from_page=0, to_page=0,
-                                              start_at=page_num)
+                try:
+                    self.pdf_document.insert_pdf(
+                        tmp,
+                        from_page=0,
+                        to_page=0,
+                        start_at=page_num,
+                        annots=True,
+                        widgets=True,
+                    )
+                finally:
+                    tmp.close()
                 self.total_pages += 1
-                self.current_page = page_num
+                if data.get("state") is not None:
+                    restore_page_bound_state(self, data["state"])
                 self._finish_page_op("Page deletion undone.")
             elif direction == "redo" and self.pdf_document:
                 self.pdf_document.delete_page(page_num)
                 self.total_pages -= 1
+                if data.get("state") is not None:
+                    restore_page_bound_state(self, data["state"])
                 if self.current_page >= self.total_pages:
                     self.current_page = self.total_pages - 1
                 self._finish_page_op("Page deletion redone.")
@@ -4131,7 +4788,10 @@ class PDFReader(PDFReaderUI):
             frm = data["from"]
             to  = data["to"]
             if self.pdf_document:
-                self.pdf_document.move_page(frm, to)
+                move_page_to_final_index(self.pdf_document, frm, to)
+            if data.get("state") is not None:
+                restore_page_bound_state(self, data["state"])
+            else:
                 self.current_page = to
             self._finish_page_op("Page move undone." if direction == "undo" else "Page move redone.")
 
@@ -4159,6 +4819,9 @@ class PDFReader(PDFReaderUI):
             "markup_add":        "Markup",
             "markup_remove":     "Markup Erase",
             "scan_text_overlay": "Text Replacement",
+            "native_document_change": "Native PDF Change",
+            "redaction_add":     "Redaction Box",
+            "redaction_remove":  "Redaction Box Removal",
             "page_add":          "Insert Page",
             "page_remove":       "Delete Page",
             "page_move":         "Move Page",

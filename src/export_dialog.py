@@ -34,6 +34,8 @@ from PyQt6.QtWidgets import (
     QVBoxLayout,
 )
 
+from office_export_core import commit_ooxml_atomic
+
 from image_export_core import (
     FORMAT_EXTENSIONS,
     QUALITY_FORMATS,
@@ -90,8 +92,9 @@ def _check_image_deps() -> tuple[bool, str]:
 
 class DocxWorker(QThread):
     progress = pyqtSignal(int, str)
-    finished = pyqtSignal(str)
+    result = pyqtSignal(str)
     error = pyqtSignal(str)
+    cancelled = pyqtSignal()
 
     def __init__(self, pdf_path: str, out_path: str, start_page: int, end_page: int):
         super().__init__()
@@ -104,27 +107,43 @@ class DocxWorker(QThread):
         try:
             from pdf2docx import Converter
 
-            self.progress.emit(5, "Initialising converter…")
-            converter = Converter(self.pdf_path)
-            try:
-                self.progress.emit(15, "Converting pages…")
-                converter.convert(
-                    self.out_path,
-                    start=self.start_page,
-                    end=self.end_page + 1,
-                )
-            finally:
-                converter.close()
-            self.progress.emit(100, "Done ✓")
-            self.finished.emit(self.out_path)
+            if self.isInterruptionRequested():
+                raise InterruptedError
+            self.progress.emit(5, "Initialising converter...")
+
+            def _produce(staged_path: str):
+                converter = Converter(self.pdf_path)
+                try:
+                    self.progress.emit(15, "Converting pages...")
+                    converter.convert(
+                        staged_path,
+                        start=self.start_page,
+                        end=self.end_page + 1,
+                    )
+                finally:
+                    converter.close()
+                if self.isInterruptionRequested():
+                    raise InterruptedError
+
+            output = commit_ooxml_atomic(self.out_path, "docx", _produce)
+            if self.isInterruptionRequested():
+                # Cancellation requested after commit is treated as success:
+                # the validated destination already exists and must not be deleted.
+                self.progress.emit(100, "Done")
+            else:
+                self.progress.emit(100, "Done")
+            self.result.emit(output)
+        except InterruptedError:
+            self.cancelled.emit()
         except Exception as exc:
-            self.error.emit(str(exc))
+            self.error.emit(f"{type(exc).__name__}: {exc}")
 
 
 class XlsxWorker(QThread):
     progress = pyqtSignal(int, str)
-    finished = pyqtSignal(str)
+    result = pyqtSignal(str)
     error = pyqtSignal(str)
+    cancelled = pyqtSignal()
 
     def __init__(self, pdf_path: str, out_path: str, all_pages: bool, page_idx: int):
         super().__init__()
@@ -139,7 +158,9 @@ class XlsxWorker(QThread):
             import tabula
             from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
-            self.progress.emit(5, "Scanning for tables…")
+            if self.isInterruptionRequested():
+                raise InterruptedError
+            self.progress.emit(5, "Scanning for tables...")
             pages = "all" if self.all_pages else (self.page_idx + 1)
             dataframes = tabula.read_pdf(
                 self.pdf_path,
@@ -147,6 +168,8 @@ class XlsxWorker(QThread):
                 multiple_tables=True,
                 silent=True,
             )
+            if self.isInterruptionRequested():
+                raise InterruptedError
             if not dataframes:
                 self.error.emit(
                     "No tables detected in the selected page(s).\n\n"
@@ -155,64 +178,83 @@ class XlsxWorker(QThread):
                 )
                 return
 
-            self.progress.emit(40, f"Found {len(dataframes)} table(s). Writing…")
-            workbook = openpyxl.Workbook()
-            workbook.remove(workbook.active)
-            header_fill = PatternFill("solid", fgColor="2563EB")
-            header_font = Font(color="FFFFFF", bold=True, size=10)
-            header_align = Alignment(horizontal="center", vertical="center", wrap_text=True)
-            thin_side = Side(style="thin", color="CCCCCC")
-            cell_border = Border(
-                left=thin_side, right=thin_side, top=thin_side, bottom=thin_side
-            )
-            alt_fill = PatternFill("solid", fgColor="EFF6FF")
+            self.progress.emit(40, f"Found {len(dataframes)} table(s). Writing...")
 
-            for table_index, dataframe in enumerate(dataframes):
-                dataframe = dataframe.dropna(how="all").fillna("")
-                sheet_name = f"Table {table_index + 1}"
-                worksheet = workbook.create_sheet(title=sheet_name)
-                for column_index, column_name in enumerate(dataframe.columns, start=1):
-                    cell = worksheet.cell(
-                        row=1, column=column_index, value=str(column_name)
-                    )
-                    cell.font = header_font
-                    cell.fill = header_fill
-                    cell.alignment = header_align
-                    cell.border = cell_border
-                worksheet.row_dimensions[1].height = 22
+            def _produce(staged_path: str):
+                workbook = openpyxl.Workbook()
+                workbook.remove(workbook.active)
+                header_fill = PatternFill("solid", fgColor="2563EB")
+                header_font = Font(color="FFFFFF", bold=True, size=10)
+                header_align = Alignment(
+                    horizontal="center", vertical="center", wrap_text=True
+                )
+                thin_side = Side(style="thin", color="CCCCCC")
+                cell_border = Border(
+                    left=thin_side, right=thin_side,
+                    top=thin_side, bottom=thin_side,
+                )
+                alt_fill = PatternFill("solid", fgColor="EFF6FF")
 
-                for row_index, row in enumerate(
-                    dataframe.itertuples(index=False), start=2
-                ):
-                    for column_index, value in enumerate(row, start=1):
+                for table_index, dataframe in enumerate(dataframes):
+                    if self.isInterruptionRequested():
+                        raise InterruptedError
+                    dataframe = dataframe.dropna(how="all").fillna("")
+                    sheet_name = f"Table {table_index + 1}"
+                    worksheet = workbook.create_sheet(title=sheet_name)
+                    for column_index, column_name in enumerate(
+                        dataframe.columns, start=1
+                    ):
                         cell = worksheet.cell(
-                            row=row_index,
-                            column=column_index,
-                            value=str(value) if value != "" else "",
+                            row=1, column=column_index, value=str(column_name)
                         )
+                        cell.font = header_font
+                        cell.fill = header_fill
+                        cell.alignment = header_align
                         cell.border = cell_border
-                        if row_index % 2 == 0:
-                            cell.fill = alt_fill
+                    worksheet.row_dimensions[1].height = 22
 
-                for column in worksheet.columns:
-                    maximum = max(len(str(cell.value or "")) for cell in column)
-                    worksheet.column_dimensions[column[0].column_letter].width = min(
-                        maximum + 4, 50
+                    for row_index, row in enumerate(
+                        dataframe.itertuples(index=False), start=2
+                    ):
+                        for column_index, value in enumerate(row, start=1):
+                            cell = worksheet.cell(
+                                row=row_index,
+                                column=column_index,
+                                value=str(value) if value != "" else "",
+                            )
+                            cell.border = cell_border
+                            if row_index % 2 == 0:
+                                cell.fill = alt_fill
+
+                    for column in worksheet.columns:
+                        maximum = max(len(str(cell.value or "")) for cell in column)
+                        worksheet.column_dimensions[
+                            column[0].column_letter
+                        ].width = min(maximum + 4, 50)
+                    worksheet.freeze_panes = "A2"
+                    percentage = 40 + int(
+                        55 * (table_index + 1) / len(dataframes)
                     )
-                worksheet.freeze_panes = "A2"
-                percentage = 40 + int(55 * (table_index + 1) / len(dataframes))
-                self.progress.emit(percentage, f"Written {sheet_name}…")
+                    self.progress.emit(percentage, f"Written {sheet_name}...")
 
-            workbook.save(self.out_path)
-            self.progress.emit(100, "Done ✓")
-            self.finished.emit(self.out_path)
+                if self.isInterruptionRequested():
+                    raise InterruptedError
+                workbook.save(staged_path)
+                if self.isInterruptionRequested():
+                    raise InterruptedError
+
+            output = commit_ooxml_atomic(self.out_path, "xlsx", _produce)
+            self.progress.emit(100, "Done")
+            self.result.emit(output)
+        except InterruptedError:
+            self.cancelled.emit()
         except Exception as exc:
-            self.error.emit(str(exc))
+            self.error.emit(f"{type(exc).__name__}: {exc}")
 
 
 class ImageWorker(QThread):
     progress = pyqtSignal(int, str)
-    finished = pyqtSignal(object)
+    result = pyqtSignal(object)
     error = pyqtSignal(str)
     cancelled = pyqtSignal()
 
@@ -239,7 +281,7 @@ class ImageWorker(QThread):
                 progress=lambda pct, msg: self.progress.emit(pct, msg),
                 cancelled=self.isInterruptionRequested,
             )
-            self.finished.emit(outputs)
+            self.result.emit(outputs)
         except InterruptedError:
             self.cancelled.emit()
         except Exception as exc:
@@ -259,7 +301,9 @@ class ExportDialog(QDialog):
         self.total_pages = total_pages
         self.current_page = current_page
         self._worker: QThread | None = None
+        self._worker_result = None
         self._last_open_target: str | None = None
+        self._close_when_worker_stops = False
 
         self.setWindowTitle("Export PDF As…")
         self.setMinimumWidth(520)
@@ -587,17 +631,33 @@ class ExportDialog(QDialog):
             options,
         )
         self._worker.progress.connect(self._on_progress)
-        self._worker.finished.connect(self._on_images_finished)
-        self._worker.error.connect(self._on_error)
-        self._worker.cancelled.connect(self._on_cancelled)
+        self._worker.result.connect(
+            lambda outputs: setattr(self, "_worker_result", ("images", outputs))
+        )
+        self._worker.error.connect(
+            lambda message: setattr(self, "_worker_result", ("error", message))
+        )
+        self._worker.cancelled.connect(
+            lambda: setattr(self, "_worker_result", ("cancelled", None))
+        )
+        self._worker.finished.connect(self._on_worker_thread_finished)
         self._worker.start()
 
     def _connect_worker(self, worker: QThread):
         worker.progress.connect(self._on_progress)
-        worker.finished.connect(self._on_finished)
-        worker.error.connect(self._on_error)
+        worker.result.connect(
+            lambda output: setattr(self, "_worker_result", ("success", output))
+        )
+        worker.error.connect(
+            lambda message: setattr(self, "_worker_result", ("error", message))
+        )
+        worker.cancelled.connect(
+            lambda: setattr(self, "_worker_result", ("cancelled", None))
+        )
+        worker.finished.connect(self._on_worker_thread_finished)
 
     def _set_running_state(self):
+        self._close_when_worker_stops = False
         self._btn_export.setEnabled(False)
         self._btn_close.setText("Stop")
         self._progress.setValue(0)
@@ -644,19 +704,70 @@ class ExportDialog(QDialog):
         self._restore_idle_state()
         QMessageBox.critical(self, "Export Error", message)
 
+    def _on_worker_thread_finished(self):
+        result = self._worker_result
+        closing = self._close_when_worker_stops
+        self._release_worker()
+        if closing:
+            QDialog.reject(self)
+            return
+        if result is None:
+            self._on_error("The export worker stopped without reporting a result.")
+            return
+        kind, payload = result
+        if kind == "success":
+            self._on_finished(payload)
+        elif kind == "images":
+            self._on_images_finished(payload)
+        elif kind == "cancelled":
+            self._on_cancelled()
+        else:
+            self._on_error(payload)
+
+    def _release_worker(self):
+        worker = self._worker
+        self._worker = None
+        self._worker_result = None
+        self._close_when_worker_stops = False
+        self._btn_close.setEnabled(True)
+        if worker is not None:
+            worker.deleteLater()
+
+
+    def _request_worker_cancel(self) -> bool:
+        if self._worker is None or not self._worker.isRunning():
+            return False
+        reply = QMessageBox.question(
+            self,
+            "Cancel Export?",
+            "Export is still running. Cancel it and close this window after "
+            "the worker has stopped safely?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return True
+        self._close_when_worker_stops = True
+        self._worker.requestInterruption()
+        self._btn_close.setEnabled(False)
+        self._progress_label.setText("Cancelling safely...")
+        return True
+
     def _on_close(self):
-        if self._worker and self._worker.isRunning():
-            self._worker.requestInterruption()
-            self._progress_label.setText("Stopping after the current page…")
-            self._worker.wait(5000)
-            if self._worker.isRunning():
-                QMessageBox.information(
-                    self,
-                    "Export Still Stopping",
-                    "The current page is still being rendered. Close this window after it finishes.",
-                )
-                return
+        if self._request_worker_cancel():
+            return
         self.reject()
+
+    def reject(self):
+        if self._request_worker_cancel():
+            return
+        QDialog.reject(self)
+
+    def closeEvent(self, event):
+        if self._request_worker_cancel():
+            event.ignore()
+            return
+        event.accept()
 
     def _resolve_pages(self) -> list[int] | None:
         try:

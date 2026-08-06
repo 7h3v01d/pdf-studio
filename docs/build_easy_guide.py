@@ -135,6 +135,8 @@ def build():
     s.append(Paragraph("PDF Studio", S_TITLE))
     s.append(Paragraph("Easy Guide — reading, filling in, and signing documents",
                        S_SUB))
+    s.append(TIP("Internal alpha: use this build only for controlled testing "
+                 "until the remaining release gates are closed."))
 
     # 1. Comfort
     s.append(H1("Making it comfortable to read"))
@@ -366,6 +368,16 @@ def build():
     s.append(P("It may take a few seconds — please wait. If it still won't "
                "open, the computer may need Microsoft Word or LibreOffice "
                "installed. Ask Leon."))
+
+    s.append(H1("Getting help with a problem"))
+    s.append(STEP(1, "Click <b>Help</b>."))
+    s.append(STEP(2, "Click <b>Diagnostics...</b>."))
+    s.append(STEP(3, "Click <b>Copy Diagnostics</b> and paste the report into "
+                     "your support message."))
+    s.append(TIP("The report does not copy words or pictures from your PDF. "
+                 "It includes technical file paths, so look over it before "
+                 "sharing. Click <b>Open Log Folder</b> to find PDF Studio's "
+                 "bounded troubleshooting logs."))
 
     # 11. Keys
     s.append(H1("The most useful keys"))

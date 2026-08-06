@@ -14,7 +14,8 @@ from PyQt6.QtGui import QIcon, QShortcut, QKeySequence, QAction, QActionGroup, Q
 from PyQt6.QtCore import Qt, QSize, QSettings
 from pdf_scroll_area import PDFScrollArea
 
-from about_dialog import APP_NAME, AboutDialog
+from app_metadata import APP_NAME
+from about_dialog import AboutDialog
 import themes
 from merge_split_dialog import MergeSplitDialog
 from annotations_panel import AnnotationsPanel
@@ -501,11 +502,15 @@ class PDFReaderUI(QMainWindow):
 
         # ── Help ─────────────────────────────────────────────────────────
         help_menu = mb.addMenu("&Help")
-        self._act_about     = QAction(f"&About {APP_NAME}", self)
+        self._act_diagnostics = QAction("&Diagnostics…", self)
+        self._act_notices = QAction("Third-Party &Licences and Notices…", self)
+        self._act_about = QAction(f"&About {APP_NAME}", self)
         self._act_shortcuts = QAction("Keyboard &Shortcuts", self)
-        help_menu.addAction(self._act_about)
+        help_menu.addAction(self._act_diagnostics)
+        help_menu.addAction(self._act_notices)
         help_menu.addSeparator()
         help_menu.addAction(self._act_shortcuts)
+        help_menu.addAction(self._act_about)
 
     # =========================================================================
     # Main toolbar
@@ -816,6 +821,8 @@ class PDFReaderUI(QMainWindow):
         )
         self._act_form_properties.triggered.connect(self.edit_selected_form_properties)
         self._act_delete_form_field.triggered.connect(self.delete_selected_form_field)
+        self._act_diagnostics.triggered.connect(self._show_diagnostics)
+        self._act_notices.triggered.connect(self._show_third_party_notices)
         self._act_about.triggered.connect(self._show_about)
         self._act_shortcuts.triggered.connect(self._show_shortcuts_help)
         self._act_ocr.triggered.connect(self._show_ocr)
@@ -975,6 +982,18 @@ class PDFReaderUI(QMainWindow):
     def _show_about(self):
         dlg = AboutDialog(self)
         dlg.exec()
+
+    def _show_diagnostics(self):
+        from diagnostics_dialog import DiagnosticsDialog
+        DiagnosticsDialog(self).exec()
+
+    def _show_third_party_notices(self):
+        from diagnostics_dialog import BundledTextDialog
+        BundledTextDialog(
+            "Third-Party Licences and Notices",
+            "THIRD_PARTY_NOTICES.md",
+            self,
+        ).exec()
 
     def _set_default_pdf_app(self):
         """Register PDF Studio as a handler for PDF files, then open the

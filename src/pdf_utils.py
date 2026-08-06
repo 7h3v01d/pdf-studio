@@ -7,57 +7,60 @@ All functions receive the PDFReader instance as first argument.
 import json
 import os
 import fitz
+from annotation_integrity_core import atomic_write_json, filter_legacy_sidecar_notes
 from PyQt6.QtWidgets import QMessageBox
 from PyQt6.QtCore import Qt
 
+from page_state_core import (
+    capture_page_bound_state,
+    delete_page_mapping,
+    insert_page_mapping,
+    move_page_mapping,
+    move_page_to_final_index,
+    qt_rows_moved_final_index,
+    remap_page_bound_state,
+)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Annotation I/O
 # ─────────────────────────────────────────────────────────────────────────────
 
 def load_annotations(pdf_document, pdf_file_path):
-    annotations = {}
-    if pdf_document:
-        try:
-            for page_num in range(pdf_document.page_count):
-                page = pdf_document.load_page(page_num)
-                for annot in page.annots():
-                    if annot.type[0] == 8:
-                        pos = annot.rect.top_left
-                        text = annot.info["content"]
-                        annotations.setdefault(page_num, []).append(
-                            (pos.x, pos.y, text))
-        except Exception as e:
-            import logging
-            logging.warning("load_annotations: failed reading embedded annotations: %s", e)
+    """Load only deferred legacy notes not already native in the PDF.
 
+    Native annotations are displayed directly from the PDF by the annotations
+    panel.  Keeping them out of this sidecar collection prevents duplicate
+    rendering and duplicate panel rows after save/reopen.
+    """
     annotation_file = pdf_file_path + ".annotations.json"
-    if os.path.exists(annotation_file):
-        try:
-            with open(annotation_file, "r") as f:
-                json_annotations = {int(k): v for k, v in json.load(f).items()}
-            for page_num, items in json_annotations.items():
-                existing = annotations.get(page_num, [])
-                for x, y, text in items:
-                    if not any(abs(ex - x) < 1 and abs(ey - y) < 1 and et == text
-                                for ex, ey, et in existing):
-                        existing.append((x, y, text))
-                annotations[page_num] = existing
-        except (OSError, ValueError, KeyError) as e:
-            import logging
-            logging.warning("load_annotations: could not read '%s': %s", annotation_file, e)
-    return annotations
+    if not os.path.exists(annotation_file):
+        return {}
+    try:
+        with open(annotation_file, "r", encoding="utf-8") as handle:
+            raw = json.load(handle)
+        return filter_legacy_sidecar_notes(raw, pdf_document)
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        import logging
+        logging.warning(
+            "load_annotations: could not read '%s': %s", annotation_file, exc
+        )
+        return {}
 
 
 def save_annotations(pdf_reader):
-    if pdf_reader.pdf_file_path:
-        annotation_file = pdf_reader.pdf_file_path + ".annotations.json"
-        try:
-            with open(annotation_file, "w") as f:
-                json.dump(pdf_reader.annotations, f)
-            pdf_reader.status_bar.showMessage("Annotations saved")
-        except Exception as e:
-            pdf_reader.status_bar.showMessage(f"Error saving annotations: {e}")
+    """Atomically persist deferred sticky notes only.
+
+    Successfully baked notes are retired from this collection, which deletes
+    the now-empty sidecar instead of maintaining a second source of truth.
+    """
+    if not pdf_reader.pdf_file_path:
+        return
+    annotation_file = pdf_reader.pdf_file_path + ".annotations.json"
+    try:
+        atomic_write_json(annotation_file, pdf_reader.annotations)
+    except Exception as exc:
+        pdf_reader.status_bar.showMessage(f"Error saving annotations: {exc}")
+        raise
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -80,10 +83,10 @@ def save_bookmarks(pdf_reader):
     if pdf_reader.pdf_file_path:
         bm_file = pdf_reader.pdf_file_path + ".bookmarks.json"
         try:
-            with open(bm_file, "w") as f:
-                json.dump(pdf_reader.bookmarks, f)
+            atomic_write_json(bm_file, pdf_reader.bookmarks)
         except OSError as e:
             pdf_reader.status_bar.showMessage(f"Warning: could not save bookmarks: {e}")
+            raise
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -170,6 +173,8 @@ def _rebuild_after_page_op(pdf_reader, status_msg):
     pdf_reader._reload_form_cache()
     pdf_reader.update_view()
     pdf_reader.refresh_forms_panel()
+    pdf_reader.refresh_annotations_panel()
+    pdf_reader.refresh_bookmark_list()
     pdf_reader.load_thumbnails()
     pdf_reader.load_toc()
     pdf_reader.page_label.setText(f" / {pdf_reader.total_pages}")
@@ -189,28 +194,21 @@ def add_page(pdf_reader):
         pdf_reader.status_bar.showMessage("No PDF loaded")
         return
     try:
+        page_count_before = pdf_reader.total_pages
         inserted_at = pdf_reader.current_page + 1
+        before_state = capture_page_bound_state(pdf_reader)
         pdf_reader.pdf_document.insert_page(inserted_at)
         pdf_reader.total_pages += 1
-        new_ann = {}
-        for pn, v in pdf_reader.annotations.items():
-            if pn <= pdf_reader.current_page:
-                new_ann[pn] = v
-            else:
-                new_ann[pn + 1] = v
-        pdf_reader.annotations = new_ann
-        new_sr = []
-        for r in pdf_reader.search_results:
-            if r["page"] <= pdf_reader.current_page:
-                new_sr.append(r)
-            else:
-                new_sr.append({"page": r["page"] + 1, "rects": r["rects"]})
-        pdf_reader.search_results = new_sr
+        remap_page_bound_state(
+            pdf_reader,
+            insert_page_mapping(page_count_before, inserted_at),
+        )
+        after_state = capture_page_bound_state(pdf_reader)
         from undo_stack import Command
         pdf_reader._undo_stack.push(Command(
             kind="page_add",
-            undo_data={"page": inserted_at},
-            redo_data={"page": inserted_at},
+            undo_data={"page": inserted_at, "state": before_state},
+            redo_data={"page": inserted_at, "state": after_state},
         ))
         _rebuild_after_page_op(pdf_reader, "Blank page added")
     except Exception as e:
@@ -224,32 +222,38 @@ def remove_page(pdf_reader):
     try:
         import fitz as _fitz
         cp = pdf_reader.current_page
+        page_count_before = pdf_reader.total_pages
+        before_state = capture_page_bound_state(pdf_reader)
 
-        # Snapshot the page as a single-page PDF bytes so undo can restore it
         tmp = _fitz.open()
-        tmp.insert_pdf(pdf_reader.pdf_document, from_page=cp, to_page=cp)
-        page_bytes = tmp.tobytes()
+        tmp.insert_pdf(
+            pdf_reader.pdf_document,
+            from_page=cp,
+            to_page=cp,
+            annots=True,
+            widgets=True,
+        )
+        page_bytes = tmp.tobytes(garbage=3, deflate=True)
         tmp.close()
 
         pdf_reader.pdf_document.delete_page(cp)
         pdf_reader.total_pages -= 1
+        remap_page_bound_state(
+            pdf_reader,
+            delete_page_mapping(page_count_before, cp),
+        )
         if pdf_reader.current_page >= pdf_reader.total_pages:
             pdf_reader.current_page = pdf_reader.total_pages - 1
-        new_ann = {
-            (pn if pn < cp else pn - 1): v
-            for pn, v in pdf_reader.annotations.items()
-            if pn != cp}
-        pdf_reader.annotations = new_ann
-        new_sr = [
-            (r if r["page"] < cp else {"page": r["page"] - 1, "rects": r["rects"]})
-            for r in pdf_reader.search_results
-            if r["page"] != cp]
-        pdf_reader.search_results = new_sr
+        after_state = capture_page_bound_state(pdf_reader)
         from undo_stack import Command
         pdf_reader._undo_stack.push(Command(
             kind="page_remove",
-            undo_data={"page": cp, "page_bytes": page_bytes},
-            redo_data={"page": cp},
+            undo_data={
+                "page": cp,
+                "page_bytes": page_bytes,
+                "state": before_state,
+            },
+            redo_data={"page": cp, "state": after_state},
         ))
         _rebuild_after_page_op(pdf_reader, "Page removed")
     except Exception as e:
@@ -262,14 +266,20 @@ def move_page_up(pdf_reader):
         return
     try:
         frm = pdf_reader.current_page
-        to  = frm - 1
-        pdf_reader.pdf_document.move_page(frm, to)
+        to = frm - 1
+        before_state = capture_page_bound_state(pdf_reader)
+        move_page_to_final_index(pdf_reader.pdf_document, frm, to)
+        remap_page_bound_state(
+            pdf_reader,
+            move_page_mapping(pdf_reader.total_pages, frm, to),
+        )
         pdf_reader.current_page = to
+        after_state = capture_page_bound_state(pdf_reader)
         from undo_stack import Command
         pdf_reader._undo_stack.push(Command(
             kind="page_move",
-            undo_data={"from": to, "to": frm},
-            redo_data={"from": frm, "to": to},
+            undo_data={"from": to, "to": frm, "state": before_state},
+            redo_data={"from": frm, "to": to, "state": after_state},
         ))
         _rebuild_after_page_op(pdf_reader, "Page moved up")
     except Exception as e:
@@ -283,17 +293,25 @@ def move_page_down(pdf_reader):
         return
     try:
         frm = pdf_reader.current_page
-        to  = frm + 1
-        pdf_reader.pdf_document.move_page(frm, to)
+        to = frm + 1
+        before_state = capture_page_bound_state(pdf_reader)
+        move_page_to_final_index(pdf_reader.pdf_document, frm, to)
+        remap_page_bound_state(
+            pdf_reader,
+            move_page_mapping(pdf_reader.total_pages, frm, to),
+        )
         pdf_reader.current_page = to
+        after_state = capture_page_bound_state(pdf_reader)
         from undo_stack import Command
         pdf_reader._undo_stack.push(Command(
             kind="page_move",
-            undo_data={"from": to, "to": frm},
-            redo_data={"from": frm, "to": to},
+            undo_data={"from": to, "to": frm, "state": before_state},
+            redo_data={"from": frm, "to": to, "state": after_state},
         ))
-        _rebuild_after_page_op(pdf_reader,
-                               f"Page moved to position {pdf_reader.current_page + 1}")
+        _rebuild_after_page_op(
+            pdf_reader,
+            f"Page moved to position {pdf_reader.current_page + 1}",
+        )
     except Exception as e:
         pdf_reader.status_bar.showMessage(f"Error moving page: {e}")
 
@@ -302,43 +320,37 @@ def handle_thumbnail_reorder(pdf_reader, parent, start, end, destination, row):
     if not pdf_reader.pdf_document:
         return
     try:
-        pdf_reader.pdf_document.move_page(start, row)
+        final_index = qt_rows_moved_final_index(
+            pdf_reader.total_pages, start, end, row
+        )
+        if start == final_index:
+            return
+        before_state = capture_page_bound_state(pdf_reader)
+        move_page_to_final_index(pdf_reader.pdf_document, start, final_index)
+        mapping = move_page_mapping(
+            pdf_reader.total_pages, start, final_index
+        )
+        remap_page_bound_state(pdf_reader, mapping)
         if pdf_reader.current_page == start:
-            pdf_reader.current_page = row
-        elif start < pdf_reader.current_page <= row:
-            pdf_reader.current_page -= 1
-        elif row <= pdf_reader.current_page < start:
-            pdf_reader.current_page += 1
-        new_ann = {}
-        for pn in range(pdf_reader.total_pages):
-            if pn == start:
-                new_ann[row] = pdf_reader.annotations.get(pn, [])
-            elif start < pn <= row:
-                new_ann[pn - 1] = pdf_reader.annotations.get(pn, [])
-            elif row < pn <= start:
-                new_ann[pn + 1] = pdf_reader.annotations.get(pn, [])
-            else:
-                new_ann[pn] = pdf_reader.annotations.get(pn, [])
-        pdf_reader.annotations = new_ann
-        new_sr = []
-        for r in pdf_reader.search_results:
-            pn = r["page"]
-            if pn == start:
-                new_sr.append({"page": row, "rects": r["rects"]})
-            elif start < pn <= row:
-                new_sr.append({"page": pn - 1, "rects": r["rects"]})
-            elif row < pn <= start:
-                new_sr.append({"page": pn + 1, "rects": r["rects"]})
-            else:
-                new_sr.append(r)
-        pdf_reader.search_results = new_sr
+            pdf_reader.current_page = final_index
+        else:
+            mapped_current = mapping.get(pdf_reader.current_page)
+            if mapped_current is not None:
+                pdf_reader.current_page = mapped_current
+        after_state = capture_page_bound_state(pdf_reader)
         from undo_stack import Command
         pdf_reader._undo_stack.push(Command(
             kind="page_move",
-            undo_data={"from": row, "to": start},
-            redo_data={"from": start, "to": row},
+            undo_data={
+                "from": final_index, "to": start, "state": before_state
+            },
+            redo_data={
+                "from": start, "to": final_index, "state": after_state
+            },
         ))
-        _rebuild_after_page_op(pdf_reader,
-                               f"Page moved from {start + 1} to {row + 1}")
+        _rebuild_after_page_op(
+            pdf_reader,
+            f"Page moved from {start + 1} to {final_index + 1}",
+        )
     except Exception as e:
         pdf_reader.status_bar.showMessage(f"Error reordering page: {e}")
