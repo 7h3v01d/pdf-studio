@@ -1,0 +1,6 @@
+# Build and validation tooling. A clean validated build captures exact versions
+# into requirements-build.lock before packaging.
+-r requirements.txt
+pytest>=9.0,<10
+PyInstaller>=6.14,<7
+pyinstaller-hooks-contrib>=2025.5

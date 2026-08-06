@@ -1,25 +1,33 @@
 PDF Studio
-Copyright 2025 Leon Priest (github.com/7h3v01d)
+Copyright 2025-2026 Leon Priest (github.com/7h3v01d)
 
-This product is licensed under the Apache License, Version 2.0.
-A copy of the license is included in LICENSE.txt.
+PDF Studio application source currently declares the Apache License, Version 2.0.
+A copy is included in LICENSE.txt.
 
-This software bundles or depends on the following third-party components,
-each under its own license:
+IMPORTANT DISTRIBUTION STATUS
+-----------------------------
+This repository is an internal development alpha. A bundled binary is not yet
+approved for family or public distribution. The Apache-2.0 source declaration
+does not, by itself, resolve the GPL/AGPL obligations of bundled dependencies.
+See THIRD_PARTY_NOTICES.md, LICENSING_DECISION_REQUIRED.md, and
+release/release_policy.json before distributing an executable.
 
-  - PyMuPDF (fitz)  — AGPL-3.0 / commercial (Artifex)
-  - PyQt6           — GPL-3.0 / commercial (Riverbank)
+Required runtime components include:
 
-Feature-specific dependencies (only used by the matching feature):
+  - PyMuPDF / MuPDF  - AGPL-3.0 or commercial terms (Artifex)
+  - PyQt6            - GPL-3.0 or commercial terms (Riverbank)
+  - Qt 6             - separate Qt licensing applies
+  - Pillow           - Pillow/HPND-style licence
+  - pytesseract      - Apache-2.0
 
-  - pytesseract, Pillow              (OCR; bundled in release builds)
-  - pdf2docx                         (Export to Word)
-  - tabula-py, openpyxl, pandas      (Export to Excel)
-  - Tesseract-OCR, Java              (external system tools)
+Separately installed tools may include Tesseract OCR, LibreOffice, Java, and
+Microsoft Office. They are not bundled by PDF Studio and carry their own terms.
+
+Feature-specific optional Python packages may include pdf2docx, tabula-py,
+openpyxl, pandas, and pywin32. A final distributor must inventory the exact
+packages included in the release manifest and preserve their notices.
 
 Bundled font:
 
-  - Atkinson Hyperlegible  — Copyright 2020 Braille Institute of America, Inc.
-    Licensed under the SIL Open Font License, Version 1.1.
-    Full license: src/fonts/OFL.txt
-    Designed to improve legibility for readers with low vision.
+  - Atkinson Hyperlegible - Copyright 2020 Braille Institute of America, Inc.
+    SIL Open Font License 1.1. Full text: src/fonts/OFL.txt

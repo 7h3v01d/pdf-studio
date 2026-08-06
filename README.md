@@ -1,4 +1,4 @@
-<img width="900" height="275" alt="banner" src="docs/images/banner.png" />
+# PDF Studio
 
 **A Windows-first PDF reader and editor built with Python, PyQt6, and PyMuPDF.**
 
@@ -7,25 +7,32 @@ forms, form design, smart form detection, and controlled editing of text inside
 scanned pages.
 
 Created by **Leon Priest** — [github.com/7h3v01d](https://github.com/7h3v01d)  
-Released under the **Apache License 2.0**.
+Application source released under **Apache-2.0**; bundled dependency obligations remain under review.
 
-![PDF Studio application window](docs/images/screenshot.png)
+![PDF Studio application window](assets/screenshot.png)
 
 ## Current release
 
 | | |
 |---|---|
-| **Version** | `3.2.0-alpha6` |
-| **Status** | Alpha — active development |
+| **Version** | `3.2.0-alpha10` |
+| **Status** | Internal alpha — integrity hardening in progress |
 | **Primary platform** | Windows 10 / 11 |
-| **Python** | 3.10+; validated with Python 3.11 |
-| **Automated tests** | 45 passing |
+| **Python** | 3.11 for the supported build workflow |
+| **Automated tests** | 103 passing in the source package |
 | **OCR engine** | Tesseract, detected automatically without editing PATH |
 
-The current release adds a branded, high-DPI-aware startup splash with a
-4.5-second minimum display and a smooth fade into the main window. It retains
-the transactional image-export workflow and the corrected coordinate path used
-by scanned-text editing, signatures, stamps, freehand annotations, and markup.
+The current release closes the residual controller-integrity defects found after
+the first release-assurance pass. It corrects real PyMuPDF page-move semantics,
+requires an explicit decision for pending redactions during Save As, completes
+document-open rollback, prevents imported Office sessions from saving into
+temporary conversion caches, and commits the PDF plus its JSON sidecars as one
+rollback-capable file transaction.
+
+> **Distribution status:** this build remains an internal alpha. Public and family
+> binary distribution is deliberately blocked by `release/release_policy.json`
+> until the PyMuPDF/MuPDF and PyQt6 licensing strategy is explicitly resolved,
+> approved, and recorded.
 
 ---
 
@@ -74,6 +81,9 @@ by scanned-text editing, signatures, stamps, freehand annotations, and markup.
 
 - Open Word, Excel, OpenDocument, RTF, and CSV files through Microsoft Office
   or LibreOffice conversion
+- Treat Office conversions as temporary viewing caches: `Ctrl+S` always opens
+  **Save As**, defaults to the original document folder and `.pdf` name, and
+  removes the temporary conversion after the session ends
 - Export PDF pages to PNG, JPEG, WebP, TIFF, BMP, or static GIF
 - Choose current page, all pages, or a discontiguous page range
 - Select image resolution up to 1200 DPI, lossy quality, and transparency where supported
@@ -87,7 +97,7 @@ by scanned-text editing, signatures, stamps, freehand annotations, and markup.
 
 ### Run from source
 
-1. Install Python 3.10 or newer.
+1. Install Python 3.11.
 2. Extract the project.
 3. Run:
 
@@ -176,6 +186,11 @@ Poppler is not required; PDF pages are rendered directly through PyMuPDF.
 The page should still look like the original scan. The added text is
 intentionally invisible. PDF Studio verifies the saved result and refuses to
 report success when no searchable words were embedded.
+
+When **Save As** is used while redaction boxes are still pending, PDF Studio now
+requires an explicit choice: apply them transactionally, save without them and
+discard the boxes, or cancel. Pending destructive state is never silently lost
+during the new-document reopen.
 
 ### Fill an existing PDF form
 
@@ -331,7 +346,7 @@ or:
 Current expected result:
 
 ```text
-45 passed
+81 passed
 ```
 
 The suite covers:
@@ -346,9 +361,23 @@ The suite covers:
 - mouse-selection endpoint handling
 - inverse-matrix point and rectangle conversion
 - strict page-range parsing and discontiguous page selection
+- transactional redaction, save, flatten, import, merge, split, and extract helpers
+- complete page-state remapping and undo snapshots
+- staged DOCX/XLSX validation and destination preservation
+- worker-dialog close/cancellation guards and thread-completion handoff
+- annotation-sidecar retirement and atomic JSON persistence
+- transactional document-open rollback
 - PNG/JPEG/GIF rendering, DPI dimensions, and transparent PNG output
 - transactional cleanup when a later page fails
 - startup minimum-duration timing and active-screen splash scaling
+- document-session redaction binding and all-plan validation
+- transactional redaction clones that leave the active PDF untouched on failure
+- bytes-safe single signature-image persistence
+- atomic PDF destination preservation for save/copy/flatten failures
+- valid and authenticated encrypted staged output
+- isolated LibreOffice workspaces, return-code checks, and PDF validation
+- central insert/delete/move remapping for annotations, markup, redactions,
+  bookmarks, searches, selections, and page-operation undo snapshots
 
 These automated tests validate the document model and critical conversion paths.
 They do not replace final Windows GUI interaction testing.
@@ -382,6 +411,12 @@ src/
 ├── extract_pages_dialog.py          Page extraction
 ├── export_dialog.py                 Word, Excel, and image export
 ├── image_export_core.py             Tested page rendering and transactional output
+├── pdf_job_core.py                  Transactional merge, split, and extraction jobs
+├── office_export_core.py            Atomic DOCX/XLSX staging and validation
+├── annotation_integrity_core.py     Native/sidecar annotation authority rules
+├── document_integrity_core.py       PDF staging, snapshots, and validation
+├── page_state_core.py               Page remapping and native move adapter
+├── save_bundle_core.py              Atomic PDF-plus-sidecar commit and rollback
 ├── splash_screen.py                 Transparent splash window and fade animation
 ├── startup_splash_core.py           Tested timing and screen-fitting rules
 ├── signature_dialog.py              Drawn signature editor
@@ -394,11 +429,11 @@ docs/                                User Manual and Easy Guide sources/PDFs
 assets/                              Screenshots and artwork
 ```
 
-Application metadata is centralised at the top of `src/about_dialog.py`:
+Application metadata is centralised in `src/app_metadata.py`:
 
 ```python
 APP_NAME = "PDF Studio"
-APP_VERSION = "3.2.0-alpha6"
+APP_VERSION = "3.2.0-alpha10"
 COMPANY_NAME = "Leon Priest"
 ```
 
@@ -465,7 +500,92 @@ unregister_pdf.bat
 
 ---
 
+## Diagnostics and support
+
+Open **Help → Diagnostics…** to view or copy a support report containing the
+application version, Windows/Python/runtime versions, dependency versions,
+Tesseract status, build-manifest information, and the locations of bounded log
+files. The report does not include PDF text or document contents. Review paths
+before sharing it.
+
+Application logs are written under the current user's local application-data
+folder and rotate automatically so they cannot grow without bound.
+
+## Release-assurance workflow
+
+- `build_clean.bat` creates a fresh Python 3.11 environment, validates dependencies, runs tests and the internal release audit, captures exact versions, generates a build manifest, and produces an **internal-only** executable.
+- `capture_release_environment.bat` records exact versions from an already passing `.venv`.
+- `prepare_release_wheelhouse.bat` downloads those exact packages and records SHA-256 hashes for offline rebuilding.
+- `release_check.bat` deliberately fails while licensing/approval gates remain unresolved.
+- `build_release.bat` works only after the release policy, exact locks, wheel hashes, clean-machine evidence, and public-release audit all pass.
+- `RELEASE_CHECKLIST.md` defines the required Windows 10/11 and licensing sign-off evidence.
+
+
 ## Recent changelog
+
+### 3.2.0-alpha10 — controller integrity III
+
+- Added a final-index adapter for PyMuPDF page moves and routed toolbar,
+  thumbnail, undo, and redo operations through it.
+- Added real page-content regression tests for downward, last-position, and
+  reverse page moves, plus Qt thumbnail destination translation.
+- Made Save As require an explicit apply/discard/cancel decision whenever
+  unapplied redaction boxes exist.
+- Completed document-open transactions: failed new sessions close and roll back;
+  successful sessions close the previous document only after the commit point.
+- Marked imported Office sessions as temporary conversions. `Ctrl+S` now invokes
+  Save As with `<original-name>.pdf`, and owned cache files are removed safely.
+- Replaced independent PDF/sidecar writes with one staged, validated,
+  rollback-capable save bundle for the PDF, notes, markup, and bookmarks.
+- Released the active source handle only at the atomic commit boundary so Windows
+  can replace a same-file destination safely, with in-memory restoration on failure.
+- Replaced the false-positive document-open source test with AST-scoped rollback
+  assertions and expanded the suite to 103 passing tests.
+
+### 3.2.0-alpha9 — release assurance I
+
+- Added rotating per-user application logs and unhandled-exception capture.
+- Added **Help → Diagnostics…** with runtime, dependency, Tesseract, build, and path information.
+- Added **Help → Third-Party Licences and Notices…** and bundled licence references.
+- Centralised application metadata so diagnostics, About, startup, and build tooling share one version.
+- Added a fail-closed release policy that blocks public binaries until a licensing strategy is approved.
+- Added exact environment capture, offline wheelhouse hashing/verification, source/build manifests, and executable SHA-256 output.
+- Replaced permissive setup/build scripts with Python 3.11 checks, `pip check`, tests, release audit, clean packaging, and explicit failure exits.
+- Added separate internal-build and release-approved build paths.
+- Added a clean Windows 10/11 release checklist and fail-closed machine-result evidence gate.
+- Added eight release-assurance regressions; the suite now reports 89 passing tests.
+
+### 3.2.0-alpha8 — integrity hardening II
+
+- Replaced direct merge and extraction output with validated staged PDF commits.
+- Made split output an all-parts transaction with rollback of replaced files.
+- Added cooperative cancellation to merge, split, extract, Word, Excel, and image workers.
+- Prevented Escape, the Close button, and the window close control from destroying active worker threads.
+- Added staged OOXML generation and structural DOCX/XLSX validation before destination replacement.
+- Made native PDF annotations authoritative after save and retired duplicate sidecar entries.
+- Migrated legacy note/markup sidecars without double-rendering native annotations.
+- Added atomic JSON sidecar writes and fail-closed page-reference validation.
+- Added bounded PDF snapshot undo for image signatures, stamps, and native annotation deletion.
+- Added rollback-safe same-file save preparation and transactional document opening.
+- Added 20 orchestration and integrity regressions; the suite now reports 81 passing tests.
+
+### 3.2.0-alpha7 — integrity hardening I
+
+- Added a central document-session reset and opaque session identity.
+- Bound pending redactions to the document session that created them.
+- Added dirty-state handling for redaction creation/removal, signatures, stamps,
+  and annotation-panel deletion.
+- Replaced sequential live redaction mutation with validated clone-and-commit.
+- Replaced signature sidecar replay with one immediate bytes-safe insertion.
+- Made flatten-to-copy operate on a clone and atomically replace only validated output.
+- Added staged atomic output for Save As, Save a Copy, and password-protected copies.
+- Isolated each LibreOffice conversion in a unique output workspace and required a
+  successful return code plus a freshly generated valid PDF.
+- Added central page-state mapping and complete sidecar snapshots for page-operation
+  undo/redo.
+- Added 16 integrity regression tests; the suite now reports 61 passing tests.
+- Kept release classification at internal alpha while remaining orchestration and
+  licensing work is completed.
 
 ### 3.2.0-alpha6 — branded startup splash
 
