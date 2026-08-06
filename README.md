@@ -19,7 +19,7 @@ Application source released under **Apache-2.0**; bundled dependency obligations
 | **Status** | Internal alpha — integrity hardening in progress |
 | **Primary platform** | Windows 10 / 11 |
 | **Python** | 3.11 for the supported build workflow |
-| **Automated tests** | 117 passing in the source package |
+| **Automated tests** | 122 passing in the source package |
 | **OCR engine** | Tesseract, detected automatically without editing PATH |
 
 The current release closes the last confidentiality gap in save recovery. Original
@@ -98,7 +98,7 @@ root, so filename resemblance alone can never establish deletion ownership.
 
 ### Run from source
 
-1. Install Python 3.11.
+1. Install Python 3.11. The optional Windows `py` launcher is **not** required.
 2. Extract the project.
 3. Run:
 
@@ -106,8 +106,20 @@ root, so filename resemblance alone can never establish deletion ownership.
 setup.bat
 ```
 
-The setup script creates `.venv`, installs the core dependencies, and generates
-helper scripts. Then launch PDF Studio with:
+The setup script locates a genuine Python 3.11 interpreter, creates `.venv`,
+installs the core dependencies, and generates helper scripts. It supports an
+existing `.venv`, `python.exe` on PATH, and standard per-user Python 3.11
+install locations. It does not depend on the optional Windows `py` launcher.
+
+For an unusual installation location, set an explicit interpreter before running
+the script:
+
+```bat
+set "PDF_STUDIO_PYTHON=C:\Path\To\Python311\python.exe"
+setup.bat
+```
+
+Then launch PDF Studio with:
 
 ```bat
 run.bat
@@ -138,7 +150,8 @@ src\dist\
 ```
 
 Using the clean build environment avoids accidental inclusion of unrelated
-packages or a second Qt binding.
+packages or a second Qt binding. `build_clean.bat` uses the same Python 3.11
+resolver as `setup.bat`, so the Windows `py` launcher is not required.
 
 ### Startup splash
 

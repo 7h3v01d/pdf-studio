@@ -1,5 +1,14 @@
 @echo off
+setlocal EnableExtensions
 REM Register PDF Studio as a handler for PDF/Word/Excel files (per-user).
-cd /d "%~dp0src"
-python register_file_types.py
+cd /d "%~dp0"
+call "tools\resolve_python311.bat" || goto :no_python
+"%PDF_STUDIO_PYTHON_EXE%" src\register_file_types.py
+set "RC=%ERRORLEVEL%"
 pause
+exit /b %RC%
+
+:no_python
+echo [ERROR] A working Python 3.11 interpreter is required.
+pause
+exit /b 1

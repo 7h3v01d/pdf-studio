@@ -9,14 +9,14 @@ echo  PDF Studio - Clean Internal Build
 echo ============================================================
 echo.
 
-where py >nul 2>&1 || goto :no_python
-py -3.11 -c "import sys; assert sys.version_info[:2] == (3, 11)" || goto :no_python
+call "tools\resolve_python311.bat" || goto :no_python
+echo [INFO] Using Python: %PDF_STUDIO_PYTHON_EXE%
 
 if exist ".buildenv" rmdir /s /q ".buildenv" || goto :fail
 if exist "src\build" rmdir /s /q "src\build" || goto :fail
 if exist "src\dist" rmdir /s /q "src\dist" || goto :fail
 
-call :run py -3.11 -m venv .buildenv || goto :fail
+call :run "%PDF_STUDIO_PYTHON_EXE%" -m venv .buildenv || goto :fail
 call :run .buildenv\Scripts\python.exe -m pip install --upgrade pip || goto :fail
 call :run .buildenv\Scripts\python.exe -m pip install -r requirements-build.txt || goto :fail
 call :run .buildenv\Scripts\python.exe -m pip check || goto :fail
@@ -45,7 +45,7 @@ echo ^> %*
 exit /b %ERRORLEVEL%
 
 :no_python
-echo [ERROR] Python 3.11 via the Windows py launcher is required.
+echo [ERROR] A working Python 3.11 interpreter is required.
 goto :failed_exit
 
 :fail

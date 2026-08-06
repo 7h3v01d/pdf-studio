@@ -1,11 +1,46 @@
 {
   "tool": "project_packager",
   "version": "3.0.1",
-  "created_utc": "2026-08-06T04:29:36+00:00",
+  "created_utc": "2026-08-06T04:59:55+00:00",
   "project": "PDF_Studio",
-  "file_count": 116,
-  "total_bytes": 3888837,
+  "file_count": 117,
+  "total_bytes": 3894150,
   "files": [
+    {
+      "path": "KNOWN_ISSUES.md",
+      "size": 5727,
+      "sha256": "b0aeb3d41a61f431b8f2fa344268f0f4fdae6b569b9e6057f68d753097ed27ca"
+    },
+    {
+      "path": "LICENSE.txt",
+      "size": 11341,
+      "sha256": "7053d9fd96aa8c2f9c30a336d77175ef217a5001fe058f6c8bb0f6d3f6abaf00"
+    },
+    {
+      "path": "LICENSING_DECISION_REQUIRED.md",
+      "size": 1310,
+      "sha256": "e26ace7c1c6c3d54b3c2cc075b8e18f9c7009b74b68fad64bded06c15112806f"
+    },
+    {
+      "path": "NOTICE",
+      "size": 1439,
+      "sha256": "2f3a58aa82277b39088c45a81a433cf1cbae5b329349f3220d54722666baa387"
+    },
+    {
+      "path": "README.md",
+      "size": 29745,
+      "sha256": "90034f8afc2e31ce806a2f2ca021c610d477adfaca17f76a8ced18230f7c79f6"
+    },
+    {
+      "path": "RELEASE_CHECKLIST.md",
+      "size": 3481,
+      "sha256": "4d5eb2f06699e59d8416e70a3fb66c414c7d97ff086adcde511e4f7e05655931"
+    },
+    {
+      "path": "THIRD_PARTY_NOTICES.md",
+      "size": 3281,
+      "sha256": "a16485d7130fb8c99ca3dd5c63485182076e03b34cd27f8daf0dd8cd92d2afa8"
+    },
     {
       "path": "assets/splashscreen.png",
       "size": 560713,
@@ -13,13 +48,13 @@
     },
     {
       "path": "build_clean.bat",
-      "size": 1941,
-      "sha256": "ece6bfc7f6a725e21ef5cdad58c511b731a86062cc8452acc85d482fc78e4bbe"
+      "size": 1934,
+      "sha256": "5b17bf969d3466c0cf28798aefd00b566296b2be88c55649b7b8a12c36a9bb65"
     },
     {
       "path": "build_release.bat",
-      "size": 1340,
-      "sha256": "f537cb794dbc7a4b2792f710f9758d4bb7d07f485317ea42e15b4d1d11c7cc2e"
+      "size": 1641,
+      "sha256": "cf89669177b0cc11947893c0901e8531de3e5e87bf79a093efe8ad5a7308e3b2"
     },
     {
       "path": "buildit.bat",
@@ -30,6 +65,26 @@
       "path": "capture_release_environment.bat",
       "size": 570,
       "sha256": "03a2765edbd7deff137ced967935d5297ec8f4eda0198f984bf34132cf2b6bd9"
+    },
+    {
+      "path": "docs/PDF_Studio_Easy_Guide.md",
+      "size": 11799,
+      "sha256": "9a36626aa551845e9575200ee31af1d650a512c4a212543e72b9c476ca8f1822"
+    },
+    {
+      "path": "docs/PDF_Studio_Easy_Guide.pdf",
+      "size": 46301,
+      "sha256": "3e178acde0369b772b496424ca3f36ff69be961028f0cb4446c2e4771a1a549e"
+    },
+    {
+      "path": "docs/PDF_Studio_Manual.md",
+      "size": 33236,
+      "sha256": "94a15114412e53b944d2d16b3d952da3ec4c0221de9c7d0245c214155b8c0d7c"
+    },
+    {
+      "path": "docs/PDF_Studio_Manual.pdf",
+      "size": 91428,
+      "sha256": "525d7bb87b143699ba94a1bffa979aea156bee622d7389e0d1230bf753614b74"
     },
     {
       "path": "docs/build_easy_guide.py",
@@ -60,36 +115,6 @@
       "path": "docs/images/screenshot.png",
       "size": 194610,
       "sha256": "14cc6d7020717d2fa73d2f67962150df54457ca1dd43246f6355e01c1be78b2a"
-    },
-    {
-      "path": "docs/PDF_Studio_Easy_Guide.md",
-      "size": 11799,
-      "sha256": "9a36626aa551845e9575200ee31af1d650a512c4a212543e72b9c476ca8f1822"
-    },
-    {
-      "path": "docs/PDF_Studio_Easy_Guide.pdf",
-      "size": 46301,
-      "sha256": "3e178acde0369b772b496424ca3f36ff69be961028f0cb4446c2e4771a1a549e"
-    },
-    {
-      "path": "docs/PDF_Studio_Manual.md",
-      "size": 33236,
-      "sha256": "94a15114412e53b944d2d16b3d952da3ec4c0221de9c7d0245c214155b8c0d7c"
-    },
-    {
-      "path": "docs/PDF_Studio_Manual.pdf",
-      "size": 91428,
-      "sha256": "525d7bb87b143699ba94a1bffa979aea156bee622d7389e0d1230bf753614b74"
-    },
-    {
-      "path": "KNOWN_ISSUES.md",
-      "size": 5727,
-      "sha256": "b0aeb3d41a61f431b8f2fa344268f0f4fdae6b569b9e6057f68d753097ed27ca"
-    },
-    {
-      "path": "LICENSE.txt",
-      "size": 11341,
-      "sha256": "7053d9fd96aa8c2f9c30a336d77175ef217a5001fe058f6c8bb0f6d3f6abaf00"
     },
     {
       "path": "licenses/AGPL-3.0-PyMuPDF-COPYING.txt",
@@ -127,16 +152,6 @@
       "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
     },
     {
-      "path": "LICENSING_DECISION_REQUIRED.md",
-      "size": 1310,
-      "sha256": "e26ace7c1c6c3d54b3c2cc075b8e18f9c7009b74b68fad64bded06c15112806f"
-    },
-    {
-      "path": "NOTICE",
-      "size": 1439,
-      "sha256": "2f3a58aa82277b39088c45a81a433cf1cbae5b329349f3220d54722666baa387"
-    },
-    {
       "path": "prepare_release_wheelhouse.bat",
       "size": 796,
       "sha256": "52ab087f1439a6ecaab61bfd41c44743f65a92a71c06fbf75fd71f3a2d754186"
@@ -147,19 +162,14 @@
       "sha256": "1373a4d1ec82330c1f516c646452ae3296302f33a82e0f97ebdba08a3c25f058"
     },
     {
-      "path": "README.md",
-      "size": 29192,
-      "sha256": "b69328bea941ae47cf904726144fd4d537a3baee9f51b0ba603067e4b9532844"
-    },
-    {
       "path": "register_pdf.bat",
-      "size": 137,
-      "sha256": "ce9b1a1755bde7a2bc4f96ad105c5703fd7d170bd4c54766c242e623a19ab4a7"
+      "size": 360,
+      "sha256": "65b80c2b1d67dc25e1c0cd926d51ef5f25383bdd80b145734850dcf0c135d7e5"
     },
     {
       "path": "release/build_manifest.json",
-      "size": 19412,
-      "sha256": "adee8731432f51855a648468bb6285c5178ad655379119b682f8bfc1a2c22ec9"
+      "size": 19574,
+      "sha256": "879c4702b904fe772c3762ab191d1f0b4f6290ee9f87273cfc80cb057aabe95f"
     },
     {
       "path": "release/clean_machine_results.template.json",
@@ -175,11 +185,6 @@
       "path": "release_check.bat",
       "size": 331,
       "sha256": "b0fc8432ccfbdf9d97e4b48fcd86a6864afdd2d438cb687cbdf582942ec10902"
-    },
-    {
-      "path": "RELEASE_CHECKLIST.md",
-      "size": 3481,
-      "sha256": "4d5eb2f06699e59d8416e70a3fb66c414c7d97ff086adcde511e4f7e05655931"
     },
     {
       "path": "requirements-build.txt",
@@ -203,8 +208,13 @@
     },
     {
       "path": "setup.bat",
-      "size": 847,
-      "sha256": "e41ec16888206a1a1934e96eae9ebd93a3c0f9bcd89dd171ac11a95661404b1f"
+      "size": 1141,
+      "sha256": "803a37417386dacddee1cea28b8ee3945f732e1db94a0d428cca5662e046d9e0"
+    },
+    {
+      "path": "src/PDF Studio.spec",
+      "size": 3140,
+      "sha256": "8cad26b3b4f38f60232243a935f422b2a01a57604491cf8c2bfcdb002bb340b6"
     },
     {
       "path": "src/about_dialog.py",
@@ -345,11 +355,6 @@
       "path": "src/password_dialog.py",
       "size": 13221,
       "sha256": "d3665a0216c59de6ba2d94c7d0c06767099a836691360d6904a476360d775d93"
-    },
-    {
-      "path": "src/PDF Studio.spec",
-      "size": 3140,
-      "sha256": "8cad26b3b4f38f60232243a935f422b2a01a57604491cf8c2bfcdb002bb340b6"
     },
     {
       "path": "src/pdf_job_core.py",
@@ -518,8 +523,8 @@
     },
     {
       "path": "tests/test_release_assurance_core.py",
-      "size": 6307,
-      "sha256": "1557c15a66bbd5134e48bc6c0d0aadb75287a3d0b6024de69b9d9a6237833b3a"
+      "size": 7696,
+      "sha256": "157eea50af8647654d653851fc29ffaa0f58cf70bad289d53e53f3dcb0185350"
     },
     {
       "path": "tests/test_rich_form_designer_core.py",
@@ -547,11 +552,6 @@
       "sha256": "bb55252dec321d924f390e7a37b4c3f60ba8145001d2ab5f1493a65b06b7dc43"
     },
     {
-      "path": "THIRD_PARTY_NOTICES.md",
-      "size": 3281,
-      "sha256": "a16485d7130fb8c99ca3dd5c63485182076e03b34cd27f8daf0dd8cd92d2afa8"
-    },
-    {
       "path": "tools/capture_validated_environment.py",
       "size": 3478,
       "sha256": "001ba059148686ed66c669106a8379147152bb7cecde329152f6329dc562b2e1"
@@ -577,14 +577,19 @@
       "sha256": "ca14dc7a46da56184afa4ef20e8135488ba621a03fcb7d664ebabba00fe1e4c2"
     },
     {
+      "path": "tools/resolve_python311.bat",
+      "size": 2175,
+      "sha256": "ae951a9f8da6f98ded6bcc5e15b4be67fa2b4a51c83f5fa7c4a37bddb24ad897"
+    },
+    {
       "path": "tools/verify_wheelhouse.py",
       "size": 1467,
       "sha256": "fc396c72d111293ee037d2328d0add368e472b30538898864594aefd836a8407"
     },
     {
       "path": "unregister_pdf.bat",
-      "size": 128,
-      "sha256": "f8235dad322199c46df0c1f6775fdaa13b4bbc30a9e2a774f90713b64308fc13"
+      "size": 351,
+      "sha256": "d033fa3d472fc5ba047c0349d1e7a5b065749d5a23bbe043a3bc935f3554fa40"
     }
   ]
 }
