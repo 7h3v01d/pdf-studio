@@ -1,6 +1,6 @@
 # PDF Studio — User Manual
 
-**Version 3.2-alpha10** · Internal alpha · Application source: Apache-2.0
+**Version 3.2-alpha12** · Internal alpha · Application source: Apache-2.0
 Leon Priest — [github.com/7h3v01d](https://github.com/7h3v01d)
 
 ---
@@ -43,9 +43,11 @@ paywall. The application source is released under Apache-2.0. Distribution of a
 bundled executable remains under review because third-party runtime components
 carry their own licence obligations.
 
-> **Internal alpha:** version 3.2-alpha10 includes three data-integrity
-> remediation passes plus the first release-assurance layer. Destructive PDF operations and background output jobs now
-> use staged, validated transaction boundaries, but packaged-GUI, dependency,
+> **Internal alpha:** version 3.2-alpha12 includes five data-integrity
+> remediation passes plus the first release-assurance layer. Save recovery now
+> verifies deletion of original transaction copies and warns prominently whenever
+> sensitive pre-redaction backups remain. Recovery data and Office-import caches
+> live only in marker-owned application directories, but packaged-GUI, dependency,
 > licensing, and clean-machine release gates remain. See `KNOWN_ISSUES.md`.
 
 **Highlights**
@@ -619,6 +621,20 @@ save. Same-file save preparation is snapshot-protected: if preparation or the
 incremental write fails, PDF Studio restores the pre-save in-memory document.
 An asterisk (`*`) in the title bar indicates unsaved changes.
 
+The PDF and its application sidecars commit as one bundle. Original transaction
+copies are kept under PDF Studio's controlled local application-data recovery
+folder, not beside the document. If a commit fails and every destination is
+restored, PDF Studio reports a normal save failure and keeps the document unsaved.
+If automatic restoration is incomplete, **Save Rollback Incomplete** shows the
+recovery path and preserves the original copies for inspection.
+
+After a successful save, PDF Studio verifies that the recovery transaction was
+removed. If antivirus, synchronisation, preview, or backup software leaves any
+original copy locked, **Recovery Copies Still Present** appears with **Retry
+Deletion** and **Open Recovery Folder** actions. Those copies may contain sensitive
+pre-redaction content, so PDF Studio does not describe a secure redaction as
+complete until cleanup is confirmed.
+
 ---
 
 ## 19. File associations (Windows)
@@ -735,6 +751,13 @@ Choose **Help → Diagnostics…** to copy a support report or open the rotating
 
 Choose **Help → Third-Party Licences and Notices…** to inspect the bundled dependency inventory and current distribution warning.
 
+
+**A save reports “Save Rollback Incomplete”**
+Stop editing the affected PDF and sidecar files. The dialog gives the recovery
+directory containing original `.original` copies and `recovery_manifest.json`.
+Keep that folder, open **Help → Diagnostics…**, and inspect the log before manually
+restoring or replacing any affected file. PDF Studio deliberately does not claim
+that destinations were preserved when automatic rollback could not finish.
 
 **A Word/Excel document won't open**
 Install **Microsoft Office** (best fidelity) or **LibreOffice** (free). Large

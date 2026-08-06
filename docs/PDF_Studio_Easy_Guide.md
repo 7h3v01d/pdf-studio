@@ -256,6 +256,11 @@ If the title bar at the top shows a **\*** , you have unsaved changes.
 **I made a mistake.**
 Press **Ctrl + Z** to undo. You can press it several times to undo more.
 
+**A message says “Save Rollback Incomplete”.**
+Stop and do not delete the recovery folder shown in the message. It contains
+original copies that may be needed to repair the save. Open **Help → Diagnostics…**
+and send Leon the report plus the recovery-folder location.
+
 **The text is too small to read.**
 See *"Making it comfortable to read"* at the top of this guide. Choose
 **Extra Large**.
@@ -299,3 +304,12 @@ will ever expire.*
 3. Click **Copy Diagnostics** and paste the report into your support message.
 
 The report does not copy the words or pictures from your PDF. It does include technical file paths, so look over it before sharing. You can also click **Open Log Folder** to find PDF Studio's bounded troubleshooting logs.
+
+
+## If PDF Studio says recovery copies remain
+
+The new PDF has been saved, but Windows could not remove a private original backup.
+Choose **Retry Deletion** after closing antivirus, preview, sync, or backup software
+that may be using the folder. Choose **Open Recovery Folder** to inspect the exact
+location. Do not treat a redaction as securely complete until PDF Studio confirms the
+recovery copies were removed.

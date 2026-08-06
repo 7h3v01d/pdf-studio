@@ -1,5 +1,5 @@
 {
-  "application_version": "3.2.0-alpha10",
+  "application_version": "3.2.0-alpha12",
   "dependencies": {
     "Pillow": "12.2.0",
     "PyInstaller": "not installed",
@@ -14,8 +14,8 @@
   "files": [
     {
       "path": "KNOWN_ISSUES.md",
-      "sha256": "3ee4816dc79a8ce654f2126271a01dce8971e74ca048d2ae5b25ef7c9a28e0ae",
-      "size": 4180
+      "sha256": "b0aeb3d41a61f431b8f2fa344268f0f4fdae6b569b9e6057f68d753097ed27ca",
+      "size": 5727
     },
     {
       "path": "LICENSE.txt",
@@ -34,33 +34,18 @@
     },
     {
       "path": "README.md",
-      "sha256": "c1ea31f640946866e70348168534e3c54b68eb8a4cce9352b12afc6cd0ca72b6",
-      "size": 26795
+      "sha256": "b69328bea941ae47cf904726144fd4d537a3baee9f51b0ba603067e4b9532844",
+      "size": 29192
     },
     {
       "path": "RELEASE_CHECKLIST.md",
-      "sha256": "749d98333ad03d85759d7213d4ec5b6b6ac7b4f8e8eacb2c9d39982eccf19702",
-      "size": 2931
+      "sha256": "4d5eb2f06699e59d8416e70a3fb66c414c7d97ff086adcde511e4f7e05655931",
+      "size": 3481
     },
     {
       "path": "THIRD_PARTY_NOTICES.md",
       "sha256": "a16485d7130fb8c99ca3dd5c63485182076e03b34cd27f8daf0dd8cd92d2afa8",
       "size": 3281
-    },
-    {
-      "path": "assets/Untitled_256.png",
-      "sha256": "bcd06ed3d0266c7d9e51c36ecef150536518df2cfbcaed2460e89121d78864e7",
-      "size": 119581
-    },
-    {
-      "path": "assets/Untitled_full.png",
-      "sha256": "b1572d4a8af28a4e66d2725d25646e6f6c8cd2667e8240471af841e2b63985ff",
-      "size": 1117892
-    },
-    {
-      "path": "assets/screenshot.png",
-      "sha256": "14cc6d7020717d2fa73d2f67962150df54457ca1dd43246f6355e01c1be78b2a",
-      "size": 194610
     },
     {
       "path": "assets/splashscreen.png",
@@ -89,33 +74,53 @@
     },
     {
       "path": "docs/PDF_Studio_Easy_Guide.md",
-      "sha256": "d3888a03696d4a603b58bf51aeea22821bd15dc02c969f83fe2671ab1f4bcb79",
-      "size": 11106
+      "sha256": "9a36626aa551845e9575200ee31af1d650a512c4a212543e72b9c476ca8f1822",
+      "size": 11799
     },
     {
       "path": "docs/PDF_Studio_Easy_Guide.pdf",
-      "sha256": "294d90b886bd78413cfac092c09411e411948ce79e246eb9af96df51b7ca8129",
-      "size": 45762
+      "sha256": "3e178acde0369b772b496424ca3f36ff69be961028f0cb4446c2e4771a1a549e",
+      "size": 46301
     },
     {
       "path": "docs/PDF_Studio_Manual.md",
-      "sha256": "dbe86a7b8bfe3a9cb598a53c281c1f1c12cf11c5eb431695101a4634a3c425cf",
-      "size": 31761
+      "sha256": "94a15114412e53b944d2d16b3d952da3ec4c0221de9c7d0245c214155b8c0d7c",
+      "size": 33236
     },
     {
       "path": "docs/PDF_Studio_Manual.pdf",
-      "sha256": "1e4e550e9f0177013088a875b23c6c95851c02c692d5817b26528626843e42bd",
-      "size": 90117
+      "sha256": "525d7bb87b143699ba94a1bffa979aea156bee622d7389e0d1230bf753614b74",
+      "size": 91428
     },
     {
       "path": "docs/build_easy_guide.py",
-      "sha256": "247955cf0b02d06129779d1628dfcbac6dded5f583f2f74e2321ef6def2bc758",
-      "size": 21596
+      "sha256": "8fa996fc1ce37980b991172a0ec3f385213945ad909f52252aaff67da2f7c722",
+      "size": 22502
     },
     {
       "path": "docs/build_manual.py",
-      "sha256": "7adcbcc7e735b6a56bd232116262484b7d704c9e910435ad34753cc57535d3e6",
+      "sha256": "36f39cdd2af7f243a54d0079bc409657a7cb0a4d7c699b30b765961860994c74",
       "size": 12345
+    },
+    {
+      "path": "docs/images/Badge_big.png",
+      "sha256": "b1572d4a8af28a4e66d2725d25646e6f6c8cd2667e8240471af841e2b63985ff",
+      "size": 1117892
+    },
+    {
+      "path": "docs/images/Badge_small.png",
+      "sha256": "bcd06ed3d0266c7d9e51c36ecef150536518df2cfbcaed2460e89121d78864e7",
+      "size": 119581
+    },
+    {
+      "path": "docs/images/banner.png",
+      "sha256": "c9fe08d9553548af76518cf499b58a269bb2ebe1a541d7debfec5e3e241121ae",
+      "size": 266857
+    },
+    {
+      "path": "docs/images/screenshot.png",
+      "sha256": "14cc6d7020717d2fa73d2f67962150df54457ca1dd43246f6355e01c1be78b2a",
+      "size": 194610
     },
     {
       "path": "licenses/AGPL-3.0-PyMuPDF-COPYING.txt",
@@ -229,7 +234,7 @@
     },
     {
       "path": "src/app_metadata.py",
-      "sha256": "b4f9dd00430acdd37462ad2f6a9f18d0239fc8421116ada82b7e1e57d95dceb0",
+      "sha256": "0f56950dad544a6e2123795bf0bbfbdd009393aea016bb9cd5c81e13a1bb19fa",
       "size": 760
     },
     {
@@ -239,8 +244,8 @@
     },
     {
       "path": "src/doc_import.py",
-      "sha256": "772c26f24c38bbf65a0d9712243ed7dbd255bcb2716d335cc33698f48e64fd85",
-      "size": 12223
+      "sha256": "c7f01b690e23147296f362f5b5c73400d3579ae01fd43d0a2523ba49201b65f9",
+      "size": 15660
     },
     {
       "path": "src/document_integrity_core.py",
@@ -364,13 +369,13 @@
     },
     {
       "path": "src/pdf_reader.py",
-      "sha256": "05ab01cb963fd08c8067da86bebb3dcda01c966ee0c88ff6627b5dde614d0334",
-      "size": 4425
+      "sha256": "f2b6f938fbc226cb18acf85d13f343b186415d87104fa0a16663ba469fd2bc02",
+      "size": 5144
     },
     {
       "path": "src/pdf_reader_app.py",
-      "sha256": "6dded83c8a57971718d6cd28728a0ec109c009fae9ef530a61bc1485fd66ea76",
-      "size": 215486
+      "sha256": "d8a72a645395f927799c76ed523704304452f0e03260d6381001f968eaf28984",
+      "size": 221597
     },
     {
       "path": "src/pdf_reader_ui.py",
@@ -393,19 +398,14 @@
       "size": 5182
     },
     {
-      "path": "src/run.bat",
-      "sha256": "ff4c76454b1ed320792f28ff2d9fcb2f615431082c9da68895308e8792e03283",
-      "size": 20
-    },
-    {
       "path": "src/runtime_support.py",
       "sha256": "13c386674e31139fc3880988161118daeb6f6e887a942c03fe6d9e2749d789ae",
       "size": 9125
     },
     {
       "path": "src/save_bundle_core.py",
-      "sha256": "f86416534e10073d164c5edd771d0b0821d61ad8a8168834b29d6262667583ca",
-      "size": 3535
+      "sha256": "4a2d4130ba0b7ee8e01c7888a627fefedfa4e54ca3ac9b3c318dc6cef49b1eac",
+      "size": 17025
     },
     {
       "path": "src/scan_text_edit_core.py",
@@ -469,8 +469,8 @@
     },
     {
       "path": "tests/test_doc_import_integrity.py",
-      "sha256": "356a60e7a741947b3e9b4c8c9b0b041034e086ef820cc3a960d41383805345d0",
-      "size": 3805
+      "sha256": "e11803891d34af4d4392154f78b19a27af987eacf26b4d534e126db69debeb0e",
+      "size": 6495
     },
     {
       "path": "tests/test_document_integrity_core.py",
@@ -509,8 +509,8 @@
     },
     {
       "path": "tests/test_orchestration_hardening_source.py",
-      "sha256": "deb8f5348e333c99c455f0417a388e03f54bab6f0f836db314ecdf62996d7723",
-      "size": 5362
+      "sha256": "34af5a9b8d317ffcaaf6f884e17960654fbb166ba64e45e0e6605e69e63b8c24",
+      "size": 6842
     },
     {
       "path": "tests/test_page_state_core.py",
@@ -524,8 +524,8 @@
     },
     {
       "path": "tests/test_release_assurance_core.py",
-      "sha256": "1d37bd16a79a073f99c7dfcd444138694671cdd8e1bb0d4880109140f10ea3f9",
-      "size": 5324
+      "sha256": "1557c15a66bbd5134e48bc6c0d0aadb75287a3d0b6024de69b9d9a6237833b3a",
+      "size": 6307
     },
     {
       "path": "tests/test_rich_form_designer_core.py",
@@ -534,8 +534,8 @@
     },
     {
       "path": "tests/test_save_bundle_core.py",
-      "sha256": "f501bcc85280196a7e6afecfa56e7dfa5e5c8d33963603508b79887c742e7553",
-      "size": 2824
+      "sha256": "f8fcc64daf38e1d81f07504fd580785c76efba67b1daf2db76aeab6abb000fd1",
+      "size": 11539
     },
     {
       "path": "tests/test_scan_text_edit_core.py",
@@ -564,8 +564,8 @@
     },
     {
       "path": "tools/generate_release_manifest.py",
-      "sha256": "6ec7f0492201b7c3d0e536d53f2c3c72b18e0712a0ddfe39923052b7d7f171a2",
-      "size": 3943
+      "sha256": "066191bda6f1ce84937647f55330a38397d1ed5428b4984470bf5341dd0dbca8",
+      "size": 3968
     },
     {
       "path": "tools/hash_wheelhouse.py",
@@ -574,8 +574,8 @@
     },
     {
       "path": "tools/release_audit.py",
-      "sha256": "94b929a039bbc0c7695c40ac8b341d5ff2889802aef9f3707cfcb4239b4956fd",
-      "size": 7895
+      "sha256": "ca14dc7a46da56184afa4ef20e8135488ba621a03fcb7d664ebabba00fe1e4c2",
+      "size": 8904
     },
     {
       "path": "tools/verify_wheelhouse.py",
@@ -589,10 +589,10 @@
     }
   ],
   "frozen_build_target": "not built",
-  "generated_utc": "2026-08-05T21:55:39.949882+00:00",
+  "generated_utc": "2026-08-06T03:45:08.303999+00:00",
   "git_commit": "",
   "manifest_kind": "source-package",
-  "platform": "Linux-6.12.13-x86_64-with-glibc2.41",
+  "platform": "Linux-6.18.35-x86_64-with-glibc2.41",
   "python": "3.13.5",
   "release_policy": {
     "approved_by": "",
@@ -605,5 +605,5 @@
   },
   "schema_version": 1,
   "source_file_count": 115,
-  "source_tree_sha256": "ff49a788e65b1e1406ff1ba709eaafc2a8ed67681d479025c877700a68ec57d0"
+  "source_tree_sha256": "b45cc72d740cee5a5648325b2d604822fd2c9ebf68b418d78e27beca1c6f9982"
 }

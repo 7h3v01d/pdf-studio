@@ -16,6 +16,7 @@ Command line:
     PDF Studio.exe  --unregister  remove those file associations
 """
 
+import logging
 import os
 import sys
 import time
@@ -63,6 +64,22 @@ def main(argv=None) -> int:
     install_exception_hook()
     if _handle_registration(argv):
         return 0
+
+    # Failed Office conversions may be interrupted by power loss or process
+    # termination before their normal session cleanup runs. Remove only old,
+    # conservatively named PDF Studio cache files; never scan user folders.
+    try:
+        from doc_import import cleanup_stale_temporary_imports
+        removed_imports = cleanup_stale_temporary_imports()
+        if removed_imports:
+            logging.getLogger("pdf_studio.startup").info(
+                "Removed %d stale Office import cache file(s)",
+                len(removed_imports),
+            )
+    except Exception:
+        logging.getLogger("pdf_studio.startup").exception(
+            "Stale Office import cleanup failed"
+        )
 
     from PyQt6.QtCore import QTimer
     from PyQt6.QtWidgets import QApplication, QMessageBox

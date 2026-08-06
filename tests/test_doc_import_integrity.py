@@ -104,16 +104,79 @@ def test_cleanup_temporary_import_refuses_unowned_files(tmp_path):
     assert user_file.exists()
 
 
-def test_cleanup_temporary_import_removes_owned_cache_file():
-    import tempfile
-    from pathlib import Path
-    from uuid import uuid4
-    from doc_import import cleanup_temporary_import
-
-    candidate = Path(tempfile.gettempdir()) / f"pdfstudio_import_{uuid4().hex[:8]}.pdf"
+def test_cleanup_temporary_import_removes_marker_owned_workspace(tmp_path, monkeypatch):
+    monkeypatch.setattr(doc_import.tempfile, "gettempdir", lambda: str(tmp_path))
+    workspace, candidate = doc_import._create_import_workspace()
     candidate.write_bytes(b"temporary")
-    try:
-        assert cleanup_temporary_import(str(candidate)) is True
-        assert not candidate.exists()
-    finally:
-        candidate.unlink(missing_ok=True)
+
+    assert doc_import.cleanup_temporary_import(str(candidate)) is True
+    assert not workspace.exists()
+
+
+def test_filename_pattern_alone_does_not_establish_import_ownership(tmp_path, monkeypatch):
+    monkeypatch.setattr(doc_import.tempfile, "gettempdir", lambda: str(tmp_path))
+    lookalike = tmp_path / "pdfstudio_import_deadbeef.pdf"
+    lookalike.write_bytes(b"unrelated")
+
+    assert doc_import.cleanup_temporary_import(str(lookalike)) is False
+    assert lookalike.exists()
+
+
+def test_convert_failure_removes_partial_owned_cache(tmp_path, monkeypatch):
+    source = tmp_path / "broken.docx"
+    source.write_text("source", encoding="utf-8")
+    monkeypatch.setattr(doc_import.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(doc_import, "_office_com_available", lambda _kind: False)
+    monkeypatch.setattr(doc_import, "_find_soffice", lambda: "soffice")
+
+    def partial_then_fail(_source, out_pdf):
+        Path(out_pdf).write_bytes(b"PARTIAL")
+        raise doc_import.ConversionError("validation failed")
+
+    monkeypatch.setattr(doc_import, "_convert_libreoffice", partial_then_fail)
+
+    with pytest.raises(doc_import.ConversionError, match="validation failed"):
+        doc_import.convert_to_pdf(str(source))
+
+    root = doc_import.import_cache_root(temp_root=tmp_path)
+    assert not root.exists() or list(root.iterdir()) == []
+
+
+def test_stale_import_cleanup_requires_marker_and_age(tmp_path, monkeypatch):
+    now = 2_000_000.0
+    monkeypatch.setattr(doc_import.tempfile, "gettempdir", lambda: str(tmp_path))
+
+    old_workspace, old_output = doc_import._create_import_workspace()
+    old_output.write_bytes(b"old-owned")
+    fresh_workspace, fresh_output = doc_import._create_import_workspace()
+    fresh_output.write_bytes(b"fresh-owned")
+
+    old_marker = old_workspace / doc_import._IMPORT_MARKER
+    fresh_marker = fresh_workspace / doc_import._IMPORT_MARKER
+    os.utime(old_marker, (now - 10_000, now - 10_000))
+    os.utime(fresh_marker, (now - 10, now - 10))
+
+    fake_workspace = doc_import.import_cache_root() / ("f" * 32)
+    fake_workspace.mkdir(parents=True)
+    (fake_workspace / doc_import._IMPORT_OUTPUT).write_bytes(b"no-marker")
+    os.utime(fake_workspace, (now - 10_000, now - 10_000))
+
+    lookalike = tmp_path / "pdfstudio_import_deadbeef.pdf"
+    lookalike.write_bytes(b"unrelated")
+    os.utime(lookalike, (now - 10_000, now - 10_000))
+
+    removed = doc_import.cleanup_stale_temporary_imports(
+        max_age_seconds=1000,
+        now=now,
+    )
+
+    assert removed == [str(old_workspace.resolve())]
+    assert not old_workspace.exists()
+    assert fresh_workspace.exists()
+    assert fake_workspace.exists()
+    assert lookalike.exists()
+
+
+def test_stale_import_cleanup_rejects_negative_age():
+    with pytest.raises(ValueError, match="cannot be negative"):
+        doc_import.cleanup_stale_temporary_imports(max_age_seconds=-1)

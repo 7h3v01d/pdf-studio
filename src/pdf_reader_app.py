@@ -18,8 +18,9 @@ from PyQt6.QtWidgets import (
     QAbstractItemView, QDateEdit, QProgressDialog)
 from PyQt6.QtGui import (
     QPixmap, QImage, QPainter, QPen, QColor, QAction, QIcon,
-    QCursor, QFont)
-from PyQt6.QtCore import Qt, QRectF, QPoint, QSize, QSettings, QDate, QTimer
+    QCursor, QFont, QDesktopServices)
+from PyQt6.QtCore import (
+    Qt, QRectF, QPoint, QSize, QSettings, QDate, QTimer, QUrl)
 from PyQt6.QtPrintSupport import QPrinter, QPrintDialog
 
 from pdf_reader_ui import PDFReaderUI
@@ -93,9 +94,12 @@ from annotation_integrity_core import (
     retire_baked_sidecar_state,
 )
 from save_bundle_core import (
+    SaveBundleRecoveryCleanupIncomplete,
+    SaveBundleRollbackIncomplete,
     StagedOperation,
     cleanup_staged_operations,
     commit_staged_operations,
+    retry_recovery_cleanup,
     stage_json_payload,
 )
 from form_field_dialog import FormFieldPropertiesDialog
@@ -1105,6 +1109,77 @@ class PDFReader(PDFReaderUI):
                 if mark_baked:
                     stroke["baked"] = True
 
+    def _show_recovery_cleanup_warning(
+        self, error: SaveBundleRecoveryCleanupIncomplete
+    ) -> bool:
+        """Warn about residual original copies and offer verified cleanup."""
+        recovery_path = str(error.recovery_directory)
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle("Recovery Copies Still Present")
+        if error.save_committed:
+            box.setText(
+                "The new PDF was saved successfully, but original recovery "
+                "copies could not be removed."
+            )
+            box.setInformativeText(
+                "These files may contain sensitive pre-redaction content. "
+                "Secure completion cannot be claimed while they remain.\n\n"
+                f"Recovery folder:\n{recovery_path}"
+            )
+        else:
+            box.setText(
+                "The save failed and destination rollback completed, but "
+                "redundant recovery copies could not be removed."
+            )
+            box.setInformativeText(f"Recovery folder:\n{recovery_path}")
+        retry_button = box.addButton(
+            "Retry Deletion", QMessageBox.ButtonRole.AcceptRole
+        )
+        open_button = box.addButton(
+            "Open Recovery Folder", QMessageBox.ButtonRole.ActionRole
+        )
+        box.addButton(QMessageBox.StandardButton.Close)
+        box.exec()
+
+        clicked = box.clickedButton()
+        if clicked is open_button:
+            QDesktopServices.openUrl(
+                QUrl.fromLocalFile(str(error.recovery_directory))
+            )
+            return False
+        if clicked is not retry_button:
+            return False
+
+        try:
+            residual = retry_recovery_cleanup(error.recovery_directory)
+        except Exception as cleanup_error:
+            logging.exception("Recovery-copy cleanup retry failed")
+            QMessageBox.critical(
+                self,
+                "Recovery Cleanup Failed",
+                "PDF Studio could not retry deletion of the recovery copies.\n\n"
+                f"{type(cleanup_error).__name__}: {cleanup_error}\n\n"
+                f"Recovery folder:\n{recovery_path}",
+            )
+            return False
+        if residual:
+            QMessageBox.warning(
+                self,
+                "Recovery Copies Still Present",
+                "Some recovery files are still locked. Close synchronisation, "
+                "antivirus, preview or backup software using the folder, then "
+                "retry.\n\n"
+                f"Recovery folder:\n{recovery_path}",
+            )
+            return False
+        QMessageBox.information(
+            self,
+            "Recovery Copies Removed",
+            "The recovery copies were removed successfully.",
+        )
+        return True
+
     def _do_save(self, path, sidecar_path=None):
         """Atomically commit the PDF and every application sidecar as one bundle."""
         if not self.pdf_document:
@@ -1140,6 +1215,7 @@ class PDFReader(PDFReaderUI):
         active_snapshot = None
         active_document_closed = False
         committed = False
+        cleanup_warning = None
         try:
             # Flush live form controls before cloning. All deferred annotations
             # are then prepared only on the independent staged document.
@@ -1194,7 +1270,12 @@ class PDFReader(PDFReaderUI):
                     self.pdf_document.close()
                     self.pdf_document = None
                     active_document_closed = True
-                commit_staged_operations(staged_operations)
+                try:
+                    commit_staged_operations(staged_operations)
+                except SaveBundleRecoveryCleanupIncomplete as cleanup_error:
+                    if not cleanup_error.save_committed:
+                        raise
+                    cleanup_warning = cleanup_error
                 committed = True
 
             # Only after the complete bundle commits may the live authority and
@@ -1239,6 +1320,21 @@ class PDFReader(PDFReaderUI):
                 # The durable save has completed; a display refresh failure must
                 # not be misreported as an unsuccessful file transaction.
                 logging.exception("Post-save UI refresh failed")
+            if cleanup_warning is not None:
+                removed = self._show_recovery_cleanup_warning(cleanup_warning)
+                if removed:
+                    self.status_bar.showMessage(
+                        f"Saved: {path}. Recovery copies removed."
+                    )
+                else:
+                    self.status_bar.showMessage(
+                        "Saved, but original recovery copies remain — privacy "
+                        "action required."
+                    )
+                logging.warning(
+                    "Save committed with residual recovery copies | recovery=%s",
+                    cleanup_warning.recovery_directory,
+                )
             return True
         except Exception as exc:
             logging.exception("PDF save bundle failed: %s", path)
@@ -1252,22 +1348,65 @@ class PDFReader(PDFReaderUI):
                         "Could not restore the active PDF after save rollback"
                     )
             self._mark_modified()
-            message = (
-                "The PDF and its application sidecars could not be committed as "
-                "one save transaction. Existing destination files were "
-                "preserved and the document remains unsaved."
-            )
-            if committed:
+            if isinstance(exc, SaveBundleRecoveryCleanupIncomplete):
+                recovery_path = str(exc.recovery_directory)
                 message = (
-                    "The file data was committed, but a later application error "
-                    "occurred. Review the diagnostics log before continuing."
+                    "The save did not commit, and destination rollback completed, "
+                    "but redundant recovery copies could not be removed. The "
+                    "document remains unsaved.\n\n"
+                    f"Recovery copies remain at:\n{recovery_path}"
                 )
+                title = "Save Failed — Recovery Cleanup Incomplete"
+                logging.error(
+                    "Failed save left residual recovery copies | recovery=%s",
+                    recovery_path,
+                )
+            elif isinstance(exc, SaveBundleRollbackIncomplete):
+                recovery_path = str(exc.recovery_directory)
+                failure_lines = "\n".join(
+                    f"  • {failure.destination}: {failure.error}"
+                    for failure in exc.failures
+                )
+                message = (
+                    "The save failed and one or more destination files could not "
+                    "be restored automatically. Do not continue editing the "
+                    "affected files until they have been inspected.\n\n"
+                    f"Recovery copies were preserved at:\n{recovery_path}\n\n"
+                    f"Rollback failures:\n{failure_lines}"
+                )
+                title = "Save Rollback Incomplete"
+                logging.critical(
+                    "Incomplete save rollback | recovery=%s | failures=%s",
+                    recovery_path,
+                    [str(failure.destination) for failure in exc.failures],
+                )
+            else:
+                message = (
+                    "The PDF and its application sidecars could not be committed "
+                    "as one save transaction. Every completed destination change "
+                    "was rolled back and the document remains unsaved."
+                )
+                title = "Save Error"
+                if committed:
+                    message = (
+                        "The file data was committed, but a later application "
+                        "error occurred. Review the diagnostics log before "
+                        "continuing."
+                    )
             QMessageBox.critical(
                 self,
-                "Save Error",
+                title,
                 f"{message}\n\n{type(exc).__name__}: {exc}",
             )
-            self.status_bar.showMessage(f"Save error: {exc}")
+            self.status_bar.showMessage(
+                "Save rollback incomplete — recovery copies preserved."
+                if isinstance(exc, SaveBundleRollbackIncomplete)
+                else (
+                    "Save failed — redundant recovery copies remain."
+                    if isinstance(exc, SaveBundleRecoveryCleanupIncomplete)
+                    else f"Save error: {exc}"
+                )
+            )
             return False
         finally:
             cleanup_staged_operations(staged_operations)

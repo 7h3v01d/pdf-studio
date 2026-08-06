@@ -354,6 +354,18 @@ def build():
     s.append(H2("I made a mistake."))
     s.append(P("Press <b>Ctrl + Z</b> to undo. You can press it several times "
                "to undo more."))
+    s.append(H2("A message says Save Rollback Incomplete."))
+    s.append(P("Stop and do not delete the recovery folder shown in the "
+               "message. It contains original copies that may be needed to "
+               "repair the save. Open <b>Help &gt; Diagnostics...</b> and send "
+               "Leon the report plus the recovery-folder location."))
+    s.append(H2("A message says Recovery Copies Still Present."))
+    s.append(P("The new PDF was saved, but Windows could not remove a private "
+               "original backup. Close antivirus, preview, synchronisation, or "
+               "backup software that may be using the folder, then click "
+               "<b>Retry Deletion</b>. Choose <b>Open Recovery Folder</b> to "
+               "inspect the exact location. Do not treat a redaction as securely "
+               "complete until PDF Studio confirms the copies were removed."))
     s.append(H2("The text is too small to read."))
     s.append(P("See <b>Making it comfortable to read</b> at the start of this "
                "guide, and choose <b>Extra Large</b>."))

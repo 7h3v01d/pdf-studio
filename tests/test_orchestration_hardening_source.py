@@ -135,3 +135,36 @@ def test_all_page_moves_route_through_final_index_adapter():
     assert ".move_page(" not in app_source
     assert utils_source.count("move_page_to_final_index(") >= 3
     assert "move_page_to_final_index(self.pdf_document, frm, to)" in app_source
+
+
+def test_save_ui_distinguishes_incomplete_rollback_and_surfaces_recovery_path():
+    method = _method_node(SRC / "pdf_reader_app.py", "PDFReader", "_do_save")
+    source = ast.unparse(method)
+    assert "SaveBundleRollbackIncomplete" in source
+    assert "recovery_directory" in source
+    assert "Save Rollback Incomplete" in source
+    assert "Existing destination files were preserved" not in source
+
+
+def test_startup_invokes_conservative_stale_import_cleanup():
+    source = (SRC / "pdf_reader.py").read_text(encoding="utf-8")
+    assert "cleanup_stale_temporary_imports" in source
+    assert "Stale Office import cleanup failed" in source
+
+
+def test_successful_save_cleanup_failure_is_a_privacy_warning_not_save_failure():
+    save_method = _method_node(SRC / "pdf_reader_app.py", "PDFReader", "_do_save")
+    save_source = ast.unparse(save_method)
+    assert "SaveBundleRecoveryCleanupIncomplete" in save_source
+    assert "cleanup_error.save_committed" in save_source
+    assert "_show_recovery_cleanup_warning" in save_source
+    assert "privacy action required" in save_source
+
+    warning_method = _method_node(
+        SRC / "pdf_reader_app.py", "PDFReader", "_show_recovery_cleanup_warning"
+    )
+    warning_source = ast.unparse(warning_method)
+    assert "Retry Deletion" in warning_source
+    assert "Open Recovery Folder" in warning_source
+    assert "retry_recovery_cleanup" in warning_source
+    assert "Secure completion cannot be claimed" in warning_source

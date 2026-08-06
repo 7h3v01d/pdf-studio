@@ -140,3 +140,29 @@ def test_release_assurance_is_wired_into_ui_spec_and_build_scripts():
         assert "pip check" in script
         assert "pytest" in script
         assert "release_audit.py" in script
+
+
+def test_runtime_assets_are_separate_from_documentation_images():
+    assets = {
+        path.relative_to(ROOT).as_posix()
+        for path in (ROOT / "assets").rglob("*")
+        if path.is_file()
+    }
+    assert assets == {"assets/splashscreen.png"}
+
+    docs_images = {
+        path.name
+        for path in (ROOT / "docs" / "images").glob("*.png")
+        if path.is_file()
+    }
+    assert {"Badge_big.png", "Badge_small.png", "banner.png", "screenshot.png"} <= docs_images
+
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    assert "![PDF Studio](docs/images/banner.png)" in readme
+    assert "![PDF Studio application window](docs/images/screenshot.png)" in readme
+    assert "assets/                              Runtime startup assets only" in readme
+
+
+def test_release_manifest_generator_excludes_package_manifest_to_avoid_hash_cycle():
+    generator = load_tool("generate_release_manifest")
+    assert "PACKAGE_MANIFEST.json" in generator.EXCLUDED_NAMES

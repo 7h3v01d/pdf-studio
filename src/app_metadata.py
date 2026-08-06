@@ -1,7 +1,7 @@
 """Application metadata shared by the GUI, diagnostics and build tooling."""
 
 APP_NAME = "PDF Studio"
-APP_VERSION = "3.2.0-alpha10"
+APP_VERSION = "3.2.0-alpha12"
 COMPANY_NAME = "Leon Priest"
 LEAD_DEV = "Leon Priest · github.com/7h3v01d"
 DESCRIPTION = (
