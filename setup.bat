@@ -2,6 +2,7 @@
 setlocal EnableExtensions
 cd /d "%~dp0"
 set "PYTHONUTF8=1"
+set "PYTHONDONTWRITEBYTECODE=1"
 
 call "tools\resolve_python311.bat" || goto :no_python
 echo [INFO] Using Python: %PDF_STUDIO_PYTHON_EXE%
@@ -15,6 +16,7 @@ call :run .venv\Scripts\python.exe -m pip install --upgrade pip || goto :fail
 call :run .venv\Scripts\python.exe -m pip install -r requirements-build.txt || goto :fail
 call :run .venv\Scripts\python.exe -m pip check || goto :fail
 call :run .venv\Scripts\python.exe -m pytest ./tests -q || goto :fail
+call :run .venv\Scripts\python.exe tools\clean_release_tree.py || goto :fail
 
 echo [OK] PDF Studio development environment is ready.
 pause

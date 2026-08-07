@@ -7,7 +7,7 @@ forms, form design, smart form detection, and controlled editing of text inside
 scanned pages.
 
 Created by **Leon Priest** — [github.com/7h3v01d](https://github.com/7h3v01d)  
-Application source released under **Apache-2.0**; bundled dependency obligations remain under review.
+PDF Studio source: **Apache-2.0 OR AGPL-3.0-only**. Official open-source builds use the AGPL path.
 
 ![PDF Studio application window](docs/images/screenshot.png)
 
@@ -16,10 +16,10 @@ Application source released under **Apache-2.0**; bundled dependency obligations
 | | |
 |---|---|
 | **Version** | `3.2.0-alpha12` |
-| **Status** | Internal alpha — integrity hardening in progress |
+| **Status** | Release-candidate source — packaged Windows build validated; clean-machine evidence pending |
 | **Primary platform** | Windows 10 / 11 |
 | **Python** | 3.11 for the supported build workflow |
-| **Automated tests** | 122 passing in the source package |
+| **Automated tests** | 141 passing on the validated Windows build |
 | **OCR engine** | Tesseract, detected automatically without editing PATH |
 
 The current release closes the last confidentiality gap in save recovery. Original
@@ -29,11 +29,17 @@ leave pre-redaction copies behind: cleanup is verified, residual copies trigger 
 prominent privacy warning, and the user can retry deletion or open the exact folder.
 Office imports now use full-UUID, marker-owned workspaces under a dedicated cache
 root, so filename resemblance alone can never establish deletion ownership.
+Acceptance testing also hardened the release-candidate UI: scanned-text font sizes
+now honour explicit values, sticky notes use standard note behaviour, the markup
+toolbar has responsive overflow, and drawn/imported signatures can be placed in
+signature fields while preserving drawn colour and stroke thickness.
 
-> **Distribution status:** this build remains an internal alpha. Public and family
-> binary distribution is deliberately blocked by `release/release_policy.json`
-> until the PyMuPDF/MuPDF and PyQt6 licensing strategy is explicitly resolved,
-> approved, and recorded.
+> **Distribution status:** the open-source licensing strategy is now selected.
+> Official builds using GPL PyQt6 and AGPL PyMuPDF use the AGPL option for
+> PDF Studio code. Exact locks, wheel hashes, and the packaged Windows build are
+> validated. Public binary distribution remains blocked until clean-machine
+> Windows 10/11 evidence, corresponding-source release packaging, and final
+> approval metadata are recorded.
 
 ---
 
@@ -55,6 +61,8 @@ root, so filename resemblance alone can never establish deletion ownership.
 - Notes, highlights, underlines, strikethrough, and freehand drawing
 - Eraser, redaction, stamps, and image signatures
 - Drag-and-drop signature images
+- Responsive **More »** overflow for narrow markup toolbars
+- Signature-field snapping for visual drawn/imported signatures
 - Undo and redo for supported editing operations
 - Insert, remove, reorder, extract, merge, and split pages
 - Save, Save As, and Save a Copy
@@ -136,14 +144,19 @@ python -m venv .venv
 
 ### Build the Windows executable
 
-Use the isolated build script:
+GitHub source checkouts intentionally do **not** track `release\wheelhouse\`.
+After `setup.bat`, recreate the exact locked wheelhouse first:
 
 ```bat
+prepare_release_wheelhouse.bat
 build_clean.bat
 ```
 
-It creates a temporary `.buildenv`, installs only the required build packages,
-and runs PyInstaller. The result is written under:
+`prepare_release_wheelhouse.bat` downloads the exact versions from the committed
+lock files, records their SHA-256 hashes, and verifies the wheelhouse.
+`build_clean.bat` then creates a temporary `.buildenv`, installs only from that
+verified offline wheelhouse, runs the tests and release audit, and invokes
+PyInstaller. The result is written under:
 
 ```text
 src\dist\
@@ -249,8 +262,8 @@ overlapping suggestions, and no field is created without explicit approval.
 
 ### Replace text in a scan
 
-1. Choose **Tools → Edit Scanned Text…**. The toolbar shortcut may also be
-   available when the full toolbar width is visible.
+1. Choose **Tools → Edit Scanned Text…**. The toolbar shortcut is also
+   available directly or under **More »** when the window is narrow.
 2. Drag a tight rectangle around a word, number, or short line.
 3. Release the mouse and wait for **Preparing Scanned-Text Editor**.
 4. Correct the recognised text and review the preview.
@@ -464,8 +477,9 @@ The PyInstaller output name is configured in `src/PDF Studio.spec`.
 ## Known limitations
 
 - This is an alpha release and should not be the only copy of important files.
-- Certificate-backed digital signing is not implemented. Signature fields and
-  image signatures are supported, but they are different features.
+- Certificate-backed digital signing is not implemented. Visual drawn/imported
+  signatures can snap into unsigned signature fields, but this does not create a
+  cryptographic PDF signature.
 - Selected-region OCR currently defaults to English.
 - Scanned-text replacement approximates the original typeface; it does not
   reconstruct the source font perfectly.
@@ -536,12 +550,40 @@ folder and rotate automatically so they cannot grow without bound.
 - `build_clean.bat` creates a fresh Python 3.11 environment, validates dependencies, runs tests and the internal release audit, captures exact versions, generates a build manifest, and produces an **internal-only** executable.
 - `capture_release_environment.bat` records exact versions from an already passing `.venv`.
 - `prepare_release_wheelhouse.bat` downloads those exact packages and records SHA-256 hashes for offline rebuilding.
-- `release_check.bat` deliberately fails while licensing/approval gates remain unresolved.
+- `release_check.bat` recognises the selected AGPL/GPL strategy but deliberately fails until clean-machine, corresponding-source packaging, and final-approval gates are complete.
 - `build_release.bat` works only after the release policy, exact locks, wheel hashes, clean-machine evidence, and public-release audit all pass.
 - `RELEASE_CHECKLIST.md` defines the required Windows 10/11 and licensing sign-off evidence.
 
 
 ## Recent changelog
+
+### 3.2.0-alpha12 — release-candidate acceptance polish
+
+- Corrected explicit scanned-text replacement font sizing in reversible and permanent modes.
+- Added standard sticky-note page icons and popup/panel access to note contents.
+- Added responsive **More »** overflow so toolbar groups remain accessible on narrower displays.
+- Added signature-field hit testing and aspect-fit placement while preserving the underlying form field.
+- Made drawn-signature ink colour and stroke thickness survive preview, placement, save, and reopen.
+- Hardened frozen diagnostics, clean-build cache handling, manifest hygiene, and locked wheelhouse builds.
+- Validated the packaged Windows build with 141 passing tests.
+
+### 3.2.0-alpha12 — acceptance-test annotation fixes
+
+- Corrected the Note tool's Qt checked-signal handling so it remains active
+  after being selected.
+- Replaced the fixed orange 11-point on-page note body with a standard compact
+  sticky-note icon.
+- Kept note text in annotation content, accessible by clicking the page icon or
+  double-clicking the Annotations panel entry.
+- Added native sticky-note icon and popup-behaviour regressions.
+
+### Release-candidate licensing decision - 2026-08-06
+
+- Dual-licensed PDF Studio source as `Apache-2.0 OR AGPL-3.0-only`.
+- Selected the AGPL option for official builds using GPL PyQt6 and AGPL PyMuPDF.
+- Replaced the unresolved-decision document with `LICENSING_STRATEGY.md`.
+- Kept public binary approval fail-closed until reproducible-build, corresponding-source, clean-machine, and final approval evidence is complete.
+- Added cross-surface licensing-policy regressions; the suite now reports 124 passing tests.
 
 ### 3.2.0-alpha12 — confidential recovery V
 
@@ -590,7 +632,7 @@ folder and rotate automatically so they cannot grow without bound.
 - Added **Help → Diagnostics…** with runtime, dependency, Tesseract, build, and path information.
 - Added **Help → Third-Party Licences and Notices…** and bundled licence references.
 - Centralised application metadata so diagnostics, About, startup, and build tooling share one version.
-- Added a fail-closed release policy that blocks public binaries until a licensing strategy is approved.
+- Added a fail-closed release policy for licensing selection, reproducible builds, clean-machine evidence, and final binary approval.
 - Added exact environment capture, offline wheelhouse hashing/verification, source/build manifests, and executable SHA-256 output.
 - Replaced permissive setup/build scripts with Python 3.11 checks, `pip check`, tests, release audit, clean packaging, and explicit failure exits.
 - Added separate internal-build and release-approved build paths.
@@ -626,8 +668,8 @@ folder and rotate automatically so they cannot grow without bound.
 - Added central page-state mapping and complete sidecar snapshots for page-operation
   undo/redo.
 - Added 16 integrity regression tests; the suite now reports 61 passing tests.
-- Kept release classification at internal alpha while remaining orchestration and
-  licensing work is completed.
+- Kept release classification conservative while remaining orchestration and
+  release-assurance work was completed.
 
 ### 3.2.0-alpha6 — branded startup splash
 
@@ -716,6 +758,9 @@ The project includes:
 
 Copyright © 2025–2026 Leon Priest.
 
-Licensed under the [Apache License 2.0](LICENSE.txt). You may use, modify, and
-distribute the project subject to the licence terms and preservation of the
-required notices.
+PDF Studio source code authored by Leon Priest is dual-licensed under
+**Apache-2.0 OR AGPL-3.0-only**, at the recipient's option. Official prebuilt
+binaries using GPL PyQt6 and AGPL PyMuPDF use the AGPL option for PDF Studio
+code and remain subject to all applicable third-party licences. See
+[LICENSE.txt](LICENSE.txt), [LICENSING_STRATEGY.md](LICENSING_STRATEGY.md),
+and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

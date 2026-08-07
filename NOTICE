@@ -1,16 +1,23 @@
 PDF Studio
 Copyright 2025-2026 Leon Priest (github.com/7h3v01d)
 
-PDF Studio application source currently declares the Apache License, Version 2.0.
-A copy is included in LICENSE.txt.
+PDF Studio source code authored by Leon Priest is available under:
 
-IMPORTANT DISTRIBUTION STATUS
------------------------------
-This repository is an internal development alpha. A bundled binary is not yet
-approved for family or public distribution. The Apache-2.0 source declaration
-does not, by itself, resolve the GPL/AGPL obligations of bundled dependencies.
-See THIRD_PARTY_NOTICES.md, LICENSING_DECISION_REQUIRED.md, and
-release/release_policy.json before distributing an executable.
+  Apache-2.0 OR AGPL-3.0-only
+
+See LICENSE.txt and the full texts in licenses/.
+
+OFFICIAL OPEN-SOURCE BUILD PATH
+-------------------------------
+Official builds using the GPL edition of PyQt6 and the AGPL edition of
+PyMuPDF/MuPDF use the AGPL-3.0-only option for PDF Studio code. Third-party
+components remain under their own licences.
+
+The licensing strategy has been selected, but public binary distribution is
+not yet approved. The remaining gates concern reproducible dependency locks,
+wheel hashes, packaged Windows testing, clean-machine evidence, and final
+release approval. See LICENSING_STRATEGY.md, THIRD_PARTY_NOTICES.md, and
+release/release_policy.json.
 
 Required runtime components include:
 

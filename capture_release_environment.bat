@@ -1,5 +1,6 @@
 @echo off
 setlocal
+set "PYTHONDONTWRITEBYTECODE=1"
 cd /d "%~dp0"
 if not exist ".venv\Scripts\python.exe" (
   echo [ERROR] .venv is missing. Run setup.bat first.
@@ -7,8 +8,10 @@ if not exist ".venv\Scripts\python.exe" (
   exit /b 1
 )
 .venv\Scripts\python.exe -m pip check || goto :fail
+.venv\Scripts\python.exe tools\clean_release_tree.py || goto :fail
 .venv\Scripts\python.exe -m pytest ./tests -v || goto :fail
 .venv\Scripts\python.exe tools\capture_validated_environment.py || goto :fail
+.venv\Scripts\python.exe tools\clean_release_tree.py || goto :fail
 .venv\Scripts\python.exe tools\release_audit.py --require-lock || goto :fail
 echo [OK] Exact versions captured from this passing Windows environment.
 pause

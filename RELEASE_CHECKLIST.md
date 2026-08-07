@@ -49,10 +49,11 @@ preconfigured Tesseract PATH.
 
 ## Distribution and legal sign-off
 
-- [ ] A PyMuPDF/MuPDF licence path is documented.
-- [ ] A PyQt6 and Qt licence path is documented.
-- [ ] Corresponding-source and notice delivery is defined, or commercial licence evidence is archived.
-- [ ] `release/release_policy.json` is updated by the project owner with strategy, approver, and UTC timestamp.
+- [x] PyMuPDF/MuPDF path documented: AGPL for official open-source builds.
+- [x] PyQt6 path documented: GPLv3 for official open-source builds; Qt terms remain preserved.
+- [x] Corresponding-source and notice delivery is defined in `LICENSING_STRATEGY.md`.
+- [x] `release/release_policy.json` records the selected strategy and licensing decision.
+- [ ] Final binary approver and UTC approval timestamp are recorded after all technical evidence passes.
 - [ ] Code signing / publisher identity is documented for the distributed executable or installer.
 
 A checked box is not evidence by itself. Store machine version, test date,

@@ -1,19 +1,27 @@
-# PDF Studio — Third-Party Licences and Notices
+# PDF Studio - Third-Party Licences and Notices
 
-**Release status:** internal development alpha. Binary redistribution has not
-been approved. This file is an engineering inventory, not legal advice.
+**Licensing strategy:** selected. PDF Studio source is available under
+`Apache-2.0 OR AGPL-3.0-only`. Official open-source binaries using the free
+PyQt6 and PyMuPDF editions use the AGPL option for PDF Studio code and remain
+subject to all applicable GPLv3/AGPLv3 obligations.
 
-PDF Studio depends on or can invoke the following software. A distributor must
-review the exact versions and licence texts included in the final build.
+**Public binary status:** not yet approved. Reproducible-build, dependency,
+clean-machine, and final approval evidence remain outstanding.
+
+This file is an engineering inventory, not legal advice. A distributor must
+review the exact package versions and licence texts included in the final build.
 
 ## Required Python runtime components
 
 ### PyMuPDF / MuPDF
 
-- Purpose: PDF rendering, editing, forms, redaction and document output.
-- Licence choice published by the project: GNU Affero General Public License
-  (AGPL) or a commercial licence from Artifex.
-- Bundled reference text: `licenses/AGPL-3.0-PyMuPDF-COPYING.txt` and `licenses/AGPL-3.0.txt`.
+- Purpose: PDF rendering, editing, forms, redaction, and document output.
+- Published licence choice: GNU Affero General Public License version 3 or a
+  commercial licence from Artifex.
+- Official PDF Studio builds use the AGPL edition unless a commercial licence
+  is explicitly recorded for that release.
+- Bundled reference texts: `licenses/AGPL-3.0-PyMuPDF-COPYING.txt` and
+  `licenses/AGPL-3.0.txt`.
 - Project: https://pymupdf.readthedocs.io/
 
 ### PyQt6 and Qt 6
@@ -21,8 +29,9 @@ review the exact versions and licence texts included in the final build.
 - Purpose: desktop user interface.
 - PyQt6 licence choice published by Riverbank: GPL version 3 or a commercial
   Riverbank licence. PyQt6 is not offered under the LGPL.
-- Riverbank's GPL wheels include the corresponding Qt libraries; those Qt
-  libraries carry their own licence obligations.
+- Official PDF Studio open-source builds use the GPL edition.
+- Riverbank's GPL wheels include Qt libraries; those Qt libraries retain their
+  own licence obligations.
 - Bundled reference texts: `licenses/GPL-3.0.txt` and
   `licenses/LGPL-3.0.txt`.
 - Project: https://www.riverbankcomputing.com/software/pyqt/
@@ -69,18 +78,17 @@ licensing and notices.
 When present, optional Windows automation may use the user's separately
 licensed Microsoft Office installation. Microsoft Office is not bundled.
 
-## PDF Studio source licence versus bundled distribution
+## PDF Studio source and official binary distribution
 
-The PDF Studio application source currently declares Apache License 2.0.
-That declaration does not by itself resolve the obligations created when a
-binary bundles GPL/AGPL dependencies. Before any public or family binary is
-distributed, the project owner must deliberately choose and document a
-compatible distribution strategy, such as:
+PDF Studio code authored by Leon Priest is dual-licensed under
+`Apache-2.0 OR AGPL-3.0-only`.
 
-1. distributing the complete combined work under terms satisfying the GPL and
-   AGPL obligations, including corresponding source and notices; or
-2. acquiring suitable commercial licences for PyMuPDF/MuPDF and PyQt6; or
-3. replacing those dependencies with alternatives whose licences match the
-   intended distribution model.
+A recipient using the standalone source may select either option. Official
+prebuilt binaries that include the GPL edition of PyQt6 and the AGPL edition of
+PyMuPDF/MuPDF use the AGPL option for PDF Studio code. PyQt6 remains GPLv3,
+PyMuPDF/MuPDF remains AGPLv3, and other components retain their own terms.
 
-See `LICENSING_DECISION_REQUIRED.md` and `release/release_policy.json`.
+Every public binary release must provide the exact corresponding PDF Studio
+source, build scripts, dependency locks, hashes, notices, licence texts, and
+third-party corresponding-source information described in
+`LICENSING_STRATEGY.md`.

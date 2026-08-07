@@ -1,12 +1,11 @@
 @echo off
 setlocal
 cd /d "%~dp0"
+set "PYTHONDONTWRITEBYTECODE=1"
 
 if not exist ".venv\Scripts\python.exe" (
     echo ERROR: .venv was not found.
-    echo Create it with: python -m venv .venv
-    echo Then install test requirements with:
-    echo   .venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+    echo Create it by running setup.bat.
     pause
     exit /b 1
 )
@@ -14,12 +13,23 @@ if not exist ".venv\Scripts\python.exe" (
 .venv\Scripts\python.exe -m pytest tests -v
 set "TEST_EXIT=%ERRORLEVEL%"
 
+.venv\Scripts\python.exe tools\clean_release_tree.py
+set "CLEAN_EXIT=%ERRORLEVEL%"
+
+if not "%CLEAN_EXIT%"=="0" (
+    echo.
+    echo Generated-tree cleanup failed with exit code %CLEAN_EXIT%.
+    set "FINAL_EXIT=%CLEAN_EXIT%"
+) else (
+    set "FINAL_EXIT=%TEST_EXIT%"
+)
+
 echo.
-if "%TEST_EXIT%"=="0" (
+if "%FINAL_EXIT%"=="0" (
     echo All tests passed.
 ) else (
-    echo Tests failed with exit code %TEST_EXIT%.
+    echo Tests or cleanup failed with exit code %FINAL_EXIT%.
 )
 
 pause
-exit /b %TEST_EXIT%
+exit /b %FINAL_EXIT%

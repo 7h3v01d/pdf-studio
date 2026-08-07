@@ -11,9 +11,10 @@ if not exist ".venv\Scripts\python.exe" (
 )
 
 call :run .venv\Scripts\python.exe -m pip check || goto :fail
+call :run .venv\Scripts\python.exe tools\clean_release_tree.py || goto :fail
 call :run .venv\Scripts\python.exe -m pytest ./tests -v || goto :fail
 call :run .venv\Scripts\python.exe tools\capture_validated_environment.py || goto :fail
-if exist ".pytest_cache" rmdir /s /q ".pytest_cache" || goto :fail
+call :run .venv\Scripts\python.exe tools\clean_release_tree.py || goto :fail
 call :run .venv\Scripts\python.exe tools\release_audit.py --require-lock || goto :fail
 call :run .venv\Scripts\python.exe tools\generate_release_manifest.py --context internal-build || goto :fail
 

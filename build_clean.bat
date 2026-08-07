@@ -17,12 +17,13 @@ if exist "src\build" rmdir /s /q "src\build" || goto :fail
 if exist "src\dist" rmdir /s /q "src\dist" || goto :fail
 
 call :run "%PDF_STUDIO_PYTHON_EXE%" -m venv .buildenv || goto :fail
-call :run .buildenv\Scripts\python.exe -m pip install --upgrade pip || goto :fail
-call :run .buildenv\Scripts\python.exe -m pip install -r requirements-build.txt || goto :fail
+call :run .buildenv\Scripts\python.exe tools\verify_wheelhouse.py || goto :fail
+call :run .buildenv\Scripts\python.exe -m pip install --no-index --find-links=release\wheelhouse -r requirements-validated.lock -r requirements-build.lock || goto :fail
 call :run .buildenv\Scripts\python.exe -m pip check || goto :fail
+call :run .buildenv\Scripts\python.exe tools\clean_release_tree.py || goto :fail
 call :run .buildenv\Scripts\python.exe -m pytest ./tests -v || goto :fail
 call :run .buildenv\Scripts\python.exe tools\capture_validated_environment.py || goto :fail
-if exist ".pytest_cache" rmdir /s /q ".pytest_cache" || goto :fail
+call :run .buildenv\Scripts\python.exe tools\clean_release_tree.py || goto :fail
 call :run .buildenv\Scripts\python.exe tools\release_audit.py --require-lock || goto :fail
 call :run .buildenv\Scripts\python.exe tools\generate_release_manifest.py --context internal-build || goto :fail
 

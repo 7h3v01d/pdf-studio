@@ -1,0 +1,8 @@
+# Generated from a test-validated environment.
+# Do not edit manually; regenerate with capture_release_environment.bat.
+PyMuPDF==1.28.0
+PyQt6==6.11.0
+PyQt6-Qt6==6.11.1
+PyQt6-sip==13.11.1
+Pillow==12.3.0
+pytesseract==0.3.13

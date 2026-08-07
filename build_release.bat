@@ -5,6 +5,7 @@ set "PYTHONUTF8=1"
 set "PYTHONDONTWRITEBYTECODE=1"
 
 if not exist ".venv\Scripts\python.exe" goto :missing
+.venv\Scripts\python.exe tools\clean_release_tree.py || goto :fail
 .venv\Scripts\python.exe tools\release_audit.py --public-release --require-lock || goto :blocked
 .venv\Scripts\python.exe tools\verify_wheelhouse.py || goto :fail
 call "tools\resolve_python311.bat" || goto :no_python
@@ -16,7 +17,10 @@ if exist "src\dist" rmdir /s /q "src\dist" || goto :fail
 "%PDF_STUDIO_PYTHON_EXE%" -m venv .releaseenv || goto :fail
 .releaseenv\Scripts\python.exe -m pip install --no-index --find-links=release\wheelhouse -r requirements-validated.lock -r requirements-build.lock || goto :fail
 .releaseenv\Scripts\python.exe -m pip check || goto :fail
+.releaseenv\Scripts\python.exe tools\clean_release_tree.py || goto :fail
 .releaseenv\Scripts\python.exe -m pytest ./tests -v || goto :fail
+.releaseenv\Scripts\python.exe tools\clean_release_tree.py || goto :fail
+.releaseenv\Scripts\python.exe tools\release_audit.py --public-release --require-lock || goto :blocked
 .releaseenv\Scripts\python.exe tools\generate_release_manifest.py --context public-release || goto :fail
 pushd src
 ..\.releaseenv\Scripts\python.exe -m PyInstaller --clean --noconfirm "PDF Studio.spec" || (popd & goto :fail)

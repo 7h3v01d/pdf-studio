@@ -1,7 +1,8 @@
 # PDF Studio 3.2.0-alpha12 — Known Issues and Release Gates
 
-This build is an **internal development alpha**. It is not yet approved for
-family distribution, public testing, or a GitHub binary release.
+This build is a **release-candidate source for controlled beta testing**. The
+licensing strategy is selected, but a public GitHub binary is not yet approved
+until reproducible-build and clean-machine evidence is complete.
 
 ## Corrected in alpha7
 
@@ -34,7 +35,7 @@ family distribution, public testing, or a GitHub binary release.
 - Python 3.11-only clean build validation with `pip check`, tests, and release audit.
 - Exact environment capture and offline wheelhouse SHA-256 manifests.
 - Separate internal and public-release build paths.
-- A fail-closed policy that blocks public/family binaries while the dependency licensing strategy remains undecided.
+- A fail-closed policy that blocks public/family binaries until licensing, reproducible-build, clean-machine, and final approval evidence are complete.
 - A clean Windows 10/11 checklist and machine-result evidence gate for public release.
 
 
@@ -83,7 +84,7 @@ family distribution, public testing, or a GitHub binary release.
 2. Extend atomic output to any optional conversion backend added in future and
    maintain disk-full / permission-denied fault-injection tests.
 3. Run the exact-version capture and wheelhouse preparation on the final validated Windows build environment, then archive the resulting manifests.
-4. Resolve PyMuPDF/MuPDF and PyQt6 binary-distribution licensing, update `release_policy.json`, and obtain any required legal review.
+4. Implement the selected AGPL/GPL release delivery plan: exact source archive, dependency locks and hashes, bundled notices, and corresponding-source information.
 5. Run clean Windows 10 and Windows 11 virtual-machine installation, upgrade, file association, OCR, diagnostics/logging, and uninstall tests.
 6. Raise coverage specifically across the real PyQt controller and packaged startup path; the current suite is much stronger but still core-heavy.
 7. Add code signing and installer provenance before a public download is labelled release-ready.
