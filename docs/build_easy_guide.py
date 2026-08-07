@@ -135,8 +135,8 @@ def build():
     s.append(Paragraph("PDF Studio", S_TITLE))
     s.append(Paragraph("Easy Guide — reading, filling in, and signing documents",
                        S_SUB))
-    s.append(TIP("Internal alpha: use this build only for controlled testing "
-                 "until the remaining release gates are closed."))
+    s.append(TIP("Release-candidate source: suitable for controlled beta use. "
+                 "Public binaries still require packaged Windows and release-evidence approval."))
 
     # 1. Comfort
     s.append(H1("Making it comfortable to read"))

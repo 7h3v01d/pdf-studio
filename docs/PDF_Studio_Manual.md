@@ -1,6 +1,6 @@
 # PDF Studio — User Manual
 
-**Version 3.2-alpha12** · Internal alpha · Application source: Apache-2.0
+**Version 3.2-alpha12** · Release-candidate source · `Apache-2.0 OR AGPL-3.0-only`
 Leon Priest — [github.com/7h3v01d](https://github.com/7h3v01d)
 
 ---
@@ -39,16 +39,15 @@ PDF Studio is a free, full-featured PDF reader and editor for Windows, built
 with Python, PyQt6, and PyMuPDF.
 
 PDF Studio does not contain a trial, activation, licence key, or feature
-paywall. The application source is released under Apache-2.0. Distribution of a
-bundled executable remains under review because third-party runtime components
-carry their own licence obligations.
+paywall. Source code authored by Leon Priest is available under
+`Apache-2.0 OR AGPL-3.0-only`. Official builds using GPL PyQt6 and AGPL
+PyMuPDF use the AGPL option for PDF Studio code.
 
-> **Internal alpha:** version 3.2-alpha12 includes five data-integrity
-> remediation passes plus the first release-assurance layer. Save recovery now
-> verifies deletion of original transaction copies and warns prominently whenever
-> sensitive pre-redaction backups remain. Recovery data and Office-import caches
-> live only in marker-owned application directories, but packaged-GUI, dependency,
-> licensing, and clean-machine release gates remain. See `KNOWN_ISSUES.md`.
+> **Release-candidate source:** version 3.2-alpha12 includes the completed
+> integrity-remediation passes and a selected open-source licensing path. Save
+> recovery verifies deletion of original transaction copies and warns whenever
+> sensitive backups remain. Packaged-GUI, dependency-lock, corresponding-source,
+> clean-machine, and final approval gates remain. See `KNOWN_ISSUES.md`.
 
 **Highlights**
 
@@ -110,7 +109,7 @@ and will tell you what is missing if you try to use one.
 |---|---|
 | **Menu bar** | File, Edit, View, Pages, Tools, Help |
 | **Main toolbar** | Open, Save, Print, page navigation, zoom, rotate, full screen, search |
-| **Markup toolbar** | Note, Highlight, Underline, Strikethrough, Draw, Eraser, colour, Signature, Stamp |
+| **Markup toolbar** | Note, Highlight, Underline, Strikethrough, Draw, Eraser, colour, Signature, Stamp, scanned-text editing, redaction |
 | **Navigation panel** (left) | Contents, Bookmarks, Annotations, Thumbnails |
 | **Page area** (centre) | The document itself |
 | **Status bar** (bottom) | Current page, zoom, rotation, view mode |
@@ -118,6 +117,10 @@ and will tell you what is missing if you try to use one.
 The **Navigation panel** has four collapsible sections. Click a section header
 to expand or collapse it; drag the dividers to resize. Its layout is remembered
 between sessions. Toggle the whole panel with **F4**.
+
+When the window is too narrow to show every markup group, complete right-hand
+groups move into **More »** instead of being clipped off-screen. The commands
+keep the same checked/enabled state and return to the toolbar when space allows.
 
 An asterisk (`*`) in the title bar means you have **unsaved changes**.
 
@@ -243,7 +246,7 @@ Select a tool from the markup toolbar, then use the mouse on the page. Press
 
 | Tool | Use |
 |---|---|
-| **📌 Note** | Click the page to place a sticky note; type its text |
+| **📌 Note** | Click the page to place a compact sticky-note icon; type its popup text |
 | **Highlight** | Drag across text |
 | **Underline** | Drag across text |
 | **Strikethrough** | Drag across text |
@@ -252,7 +255,10 @@ Select a tool from the markup toolbar, then use the mouse on the page. Press
 | **◉ (colour)** | Sets the markup colour (remembered between sessions) |
 
 The **Annotations** section of the navigation panel lists every annotation in
-the document. Click one to jump to it, or delete it from there.
+the document. Click an item to jump to it. Double-click a sticky note, or click
+its icon on the page while no tool is active, to open the note body. The note
+text is not painted over the PDF page. Annotations can also be deleted from the
+panel.
 
 Before save, new notes and markup remain deferred and undoable. After a successful
 save they become native PDF annotations and the legacy sidecar entry is retired,
@@ -285,7 +291,8 @@ Click **✍ Signature** on the markup toolbar. You have two modes:
 **Draw signature**
 
 1. Draw in the canvas with the mouse. Adjust **Thickness** and **Ink Colour**;
-   **Clear** to start over.
+   existing strokes update immediately so the preview matches the saved result.
+   Use **Clear** to start over.
 2. Click **Add Signature**, then **click the page** where it should go.
 
 ### Drag and drop
@@ -296,8 +303,11 @@ background is removed automatically.
 
 ### Sizing
 
-Signatures are placed at a sensible default width (~200pt), aspect-ratio
-preserved, capped at half the page width. Use `Ctrl+Z` to undo a misplacement.
+On ordinary page content, signatures are placed at a sensible default width
+(~200pt), aspect-ratio preserved, capped at half the page width. If you click
+inside an unsigned PDF signature field, the visual signature snaps into that
+field with padding while the genuine form field is preserved. Use `Ctrl+Z` to
+undo a misplacement.
 
 ### Stamps
 
@@ -732,7 +742,7 @@ Release-assurance utilities:
 
 - `capture_release_environment.bat` records exact versions from a passing Windows environment.
 - `prepare_release_wheelhouse.bat` downloads those versions and records SHA-256 hashes.
-- `release_check.bat` checks the public-release policy and deliberately fails while licensing approval is unresolved.
+- `release_check.bat` recognises the selected AGPL/GPL strategy and deliberately fails while build evidence or final approval remains incomplete.
 - `build_release.bat` uses the verified offline wheelhouse and is available only after every public-release gate passes.
 
 > **Always use `python -m PyInstaller`, never a bare `pyinstaller`.** The bare
@@ -804,8 +814,10 @@ A markup tool is active. Press `Esc`.
 ## 23. Licence and credits
 
 **PDF Studio** - Copyright © 2025-2026 Leon Priest.
-The application source currently declares the **Apache License, Version 2.0**.
-See `LICENSE.txt`.
+Source code authored by Leon Priest is dual-licensed under
+**Apache-2.0 OR AGPL-3.0-only**, at the recipient's option. Official builds
+using GPL PyQt6 and AGPL PyMuPDF use the AGPL option for PDF Studio code.
+See `LICENSE.txt` and `LICENSING_STRATEGY.md`.
 
 ### Third-party components
 
@@ -823,8 +835,8 @@ and `pywin32`.
 
 See `NOTICE`, `THIRD_PARTY_NOTICES.md`, and the bundled `licenses` folder.
 
-> **Distribution gate:** a bundled binary is not approved for family or public
-> distribution until the project owner deliberately resolves the PyMuPDF/MuPDF,
-> PyQt6, and Qt licensing strategy and records approval in
+> **Distribution gate:** the AGPL/GPL open-source strategy is selected. A public
+> binary remains blocked until exact locks and hashes, corresponding-source
+> delivery, clean Windows evidence, and final approval are recorded in
 > `release/release_policy.json`. `release_check.bat` enforces this gate. This is
 > an engineering safeguard, not legal advice.

@@ -244,10 +244,10 @@ def cover():
     s.append(Spacer(1, 20))
     meta = ParagraphStyle("cm", fontName=BODY, fontSize=11.5, leading=19, textColor=MUTED)
     s.append(Paragraph("Version 3.2-alpha12", meta))
-    s.append(Paragraph("Internal development alpha - release assurance in progress", meta))
+    s.append(Paragraph("Release-candidate source - packaged release evidence in progress", meta))
     s.append(Spacer(1, 14))
     s.append(Paragraph("Leon Priest &nbsp;·&nbsp; github.com/7h3v01d", meta))
-    s.append(Paragraph("Application source: Apache-2.0; binary distribution not approved", meta))
+    s.append(Paragraph("Source: Apache-2.0 OR AGPL-3.0-only; public binary evidence pending", meta))
     s.append(PageBreak())
     return s
 

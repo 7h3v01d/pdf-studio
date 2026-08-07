@@ -2,7 +2,7 @@
 
 A simple guide to reading, filling in, and signing documents.
 
-> **Internal alpha:** use this build only for controlled testing until the remaining release gates are closed.
+> **Release-candidate source:** suitable for controlled beta use. Public binaries still require packaged Windows and release-evidence approval.
 
 ---
 
@@ -175,16 +175,19 @@ where you want the signature to go. Done.
 4. Leave **Remove white background** ticked — this hides the white paper around
    your signature so only the ink shows.
 5. Click **Add Signature**.
-6. **Click the spot on the page** where the signature should go.
+6. **Click the spot on the page** where the signature should go. If you click
+   inside a signature field, PDF Studio fits the signature neatly inside it.
 
 ### Way 2 — Draw it with the mouse
 
 1. Click **✍ Signature** on the toolbar.
 2. Make sure **Draw signature** is selected.
-3. Draw your signature in the white box using the mouse.
+3. Draw your signature in the white box using the mouse. Change **Thickness**
+   or **Ink Colour** at any time; the drawing updates to match.
    (If you don't like it, click **Clear** and try again.)
 4. Click **Add Signature**.
-5. **Click the spot on the page** where the signature should go.
+5. **Click the spot on the page** where the signature should go. A signature
+   field is detected automatically and the signature is fitted inside it.
 
 ### Then save it
 
@@ -198,7 +201,8 @@ Click **Save**. The signature is now part of the document.
 
 Click any of these buttons on the toolbar, then use the mouse on the page:
 
-- **📌 Note** — click the page to leave a sticky note.
+- **📌 Note** — click the page to leave a small sticky-note icon. Click the
+  icon later to read the note; its text does not cover the page.
 - **Highlight** — drag across text to highlight it.
 - **Underline** — drag across text to underline it.
 - **Strikethrough** — drag across text to cross it out.
