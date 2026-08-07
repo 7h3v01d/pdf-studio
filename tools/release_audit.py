@@ -14,7 +14,7 @@ REQUIRED_FILES = (
     "LICENSE.txt",
     "NOTICE",
     "THIRD_PARTY_NOTICES.md",
-    "LICENSING_DECISION_REQUIRED.md",
+    "LICENSING_STRATEGY.md",
     "release/release_policy.json",
     "RELEASE_CHECKLIST.md",
     "release/clean_machine_results.template.json",
@@ -22,6 +22,7 @@ REQUIRED_FILES = (
     "licenses/GPL-3.0.txt",
     "licenses/LGPL-3.0.txt",
     "licenses/AGPL-3.0.txt",
+    "licenses/AGPL-3.0-PyMuPDF-COPYING.txt",
     "licenses/Pillow-License.txt",
     "licenses/pytesseract-License.txt",
     "assets/splashscreen.png",
@@ -94,7 +95,7 @@ def run(public_release: bool, require_lock: bool) -> list[str]:
     for token in (
         "../assets/splashscreen.png",
         "../THIRD_PARTY_NOTICES.md",
-        "../LICENSING_DECISION_REQUIRED.md",
+        "../LICENSING_STRATEGY.md",
         "../release/build_manifest.json",
         "../licenses",
     ):
@@ -119,11 +120,26 @@ def run(public_release: bool, require_lock: bool) -> list[str]:
         failures.append(f"Invalid release policy: {exc}")
         policy = {}
 
+    strategy = policy.get("license_strategy")
+    if strategy not in ALLOWED_PUBLIC_STRATEGIES:
+        failures.append("A recognised binary licensing strategy has not been selected")
+    if strategy == "agpl-gpl-compliant-source-distribution":
+        if not str(policy.get("license_decision_by", "")).strip():
+            failures.append("Release policy has no licensing decision owner")
+        if not str(policy.get("license_decision_utc", "")).strip():
+            failures.append("Release policy has no licensing decision timestamp")
+        license_text = (ROOT / "LICENSE.txt").read_text(encoding="utf-8", errors="replace")
+        if "Apache-2.0 OR AGPL-3.0-only" not in license_text:
+            failures.append("LICENSE.txt does not declare the selected dual-licence expression")
+        metadata_text = (ROOT / "src" / "app_metadata.py").read_text(encoding="utf-8")
+        if "Apache-2.0 OR AGPL-3.0-only" not in metadata_text:
+            failures.append("Application metadata does not expose the selected source licence")
+        if (ROOT / "LICENSING_DECISION_REQUIRED.md").exists():
+            failures.append("Obsolete LICENSING_DECISION_REQUIRED.md remains after strategy selection")
+
     if public_release:
         if policy.get("binary_distribution_approved") is not True:
             failures.append("Public binary release is not approved by release_policy.json")
-        if policy.get("license_strategy") not in ALLOWED_PUBLIC_STRATEGIES:
-            failures.append("A recognised binary licensing strategy has not been selected")
         if not str(policy.get("approved_by", "")).strip():
             failures.append("Release policy has no approving person")
         if not str(policy.get("approved_utc", "")).strip():
@@ -189,10 +205,21 @@ def run(public_release: bool, require_lock: bool) -> list[str]:
             failures.append(f"README.md does not reference documentation image {relative}")
 
     forbidden_dirs = {".pytest_cache", "__pycache__"}
+
+    excluded_roots = {".git", ".venv", ".buildenv", ".releaseenv"}
+
     for path in ROOT.rglob("*"):
+        relative = path.relative_to(ROOT)
+
+        if relative.parts and relative.parts[0] in excluded_roots:
+            continue
+
         if path.is_dir() and path.name in forbidden_dirs:
-            failures.append(f"Release tree contains generated directory: {path.relative_to(ROOT)}")
+            failures.append(
+                f"Release tree contains generated directory: {relative}"
+            )
             break
+
     return failures
 
 
@@ -209,7 +236,10 @@ def main() -> int:
         return 1
     print("Release audit passed.")
     if not args.public_release:
-        print("Distribution status remains internal-development-only.")
+        policy = json.loads((ROOT / "release" / "release_policy.json").read_text(encoding="utf-8"))
+        print(f"Distribution status: {policy.get('distribution_status', 'unspecified')}.")
+        if policy.get("binary_distribution_approved") is not True:
+            print("Public binary approval remains false.")
     return 0
 
 

@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout,
                              QStackedWidget, QCheckBox, QFileDialog,
                              QButtonGroup)
 from PyQt6.QtGui import (QPixmap, QPainter, QPen, QColor, QCursor,
-                         QImage)
+                         QImage, QPainterPath)
 from PyQt6.QtCore import Qt, QPoint, QSize
 
 
@@ -46,72 +46,117 @@ def make_white_transparent(pixmap: QPixmap, threshold: int = 235) -> QPixmap:
 
 
 class SignatureCanvas(QWidget):
-    """A white canvas the user draws on with the mouse."""
+    """A white canvas that keeps signature strokes as editable vector paths.
+
+    Pen colour and thickness are global signature properties: changing either
+    control redraws strokes that are already on the canvas, so the preview and
+    exported signature always agree with the selected settings.
+    """
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedSize(500, 150)
         self.setCursor(QCursor(Qt.CursorShape.CrossCursor))
         self._image = QImage(self.size(), QImage.Format.Format_ARGB32)
-        self._image.fill(Qt.GlobalColor.white)
+        self._image.fill(Qt.GlobalColor.transparent)
         self._drawing = False
-        self._last_point = QPoint()
+        self._strokes = []
+        self._current_stroke = None
         self._pen_color = QColor("#1a1a2e")
         self._pen_width = 3
 
+    @property
+    def pen_color(self) -> QColor:
+        return QColor(self._pen_color)
+
+    @property
+    def pen_width(self) -> int:
+        return int(self._pen_width)
+
     def set_pen_color(self, color: QColor):
-        self._pen_color = color
+        if not color.isValid():
+            return
+        self._pen_color = QColor(color)
+        self._rebuild_image()
 
     def set_pen_width(self, w: int):
-        self._pen_width = w
+        self._pen_width = max(1, int(w))
+        self._rebuild_image()
 
     def clear(self):
-        self._image.fill(Qt.GlobalColor.white)
+        self._strokes.clear()
+        self._current_stroke = None
+        self._image.fill(Qt.GlobalColor.transparent)
         self.update()
 
     def is_blank(self) -> bool:
-        white = QColor(Qt.GlobalColor.white).rgb()
-        for y in range(0, self._image.height(), 4):
-            for x in range(0, self._image.width(), 4):
-                if self._image.pixel(x, y) != white:
-                    return False
-        return True
+        return not any(stroke for stroke in self._strokes)
 
     def get_pixmap(self) -> QPixmap:
-        """Return only the ink area as a transparent-background pixmap."""
-        result = QImage(self._image.size(), QImage.Format.Format_ARGB32)
-        result.fill(Qt.GlobalColor.transparent)
-        for y in range(self._image.height()):
-            for x in range(self._image.width()):
-                px = QColor(self._image.pixel(x, y))
-                if px.red() < 240 or px.green() < 240 or px.blue() < 240:
-                    result.setPixelColor(x, y, px)
-        return QPixmap.fromImage(result)
+        """Return the current ink exactly as previewed, on transparency."""
+        return QPixmap.fromImage(self._image.copy())
+
+    def _rebuild_image(self):
+        self._image.fill(Qt.GlobalColor.transparent)
+        if not self._strokes:
+            self.update()
+            return
+
+        painter = QPainter(self._image)
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            painter.setPen(QPen(
+                self._pen_color,
+                self._pen_width,
+                Qt.PenStyle.SolidLine,
+                Qt.PenCapStyle.RoundCap,
+                Qt.PenJoinStyle.RoundJoin,
+            ))
+            for stroke in self._strokes:
+                if not stroke:
+                    continue
+                if len(stroke) == 1:
+                    painter.drawPoint(stroke[0])
+                    continue
+                path = QPainterPath()
+                path.moveTo(float(stroke[0].x()), float(stroke[0].y()))
+                for point in stroke[1:]:
+                    path.lineTo(float(point.x()), float(point.y()))
+                painter.drawPath(path)
+        finally:
+            painter.end()
+        self.update()
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._drawing = True
-            self._last_point = event.position().toPoint()
+            point = event.position().toPoint()
+            self._current_stroke = [point]
+            self._strokes.append(self._current_stroke)
+            self._rebuild_image()
 
     def mouseMoveEvent(self, event):
-        if self._drawing and event.buttons() & Qt.MouseButton.LeftButton:
-            painter = QPainter(self._image)
-            pen = QPen(self._pen_color, self._pen_width,
-                       Qt.PenStyle.SolidLine,
-                       Qt.PenCapStyle.RoundCap,
-                       Qt.PenJoinStyle.RoundJoin)
-            painter.setPen(pen)
-            painter.drawLine(self._last_point, event.position().toPoint())
-            painter.end()
-            self._last_point = event.position().toPoint()
-            self.update()
+        if (
+            self._drawing
+            and self._current_stroke is not None
+            and event.buttons() & Qt.MouseButton.LeftButton
+        ):
+            point = event.position().toPoint()
+            if point != self._current_stroke[-1]:
+                self._current_stroke.append(point)
+                self._rebuild_image()
 
     def mouseReleaseEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._drawing = False
+            self._current_stroke = None
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.drawImage(0, 0, self._image)
+        try:
+            painter.fillRect(self.rect(), Qt.GlobalColor.white)
+            painter.drawImage(0, 0, self._image)
+        finally:
+            painter.end()
 
 
 class SignatureDialog(QDialog):
@@ -242,7 +287,7 @@ class SignatureDialog(QDialog):
         return pm
 
     def _pick_color(self):
-        col = QColorDialog.getColor(QColor("#1a1a2e"), self, "Choose Ink Colour")
+        col = QColorDialog.getColor(self.canvas.pen_color, self, "Choose Ink Colour")
         if col.isValid():
             self.canvas.set_pen_color(col)
             self.color_btn.setStyleSheet(

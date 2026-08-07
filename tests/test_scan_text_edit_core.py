@@ -85,13 +85,71 @@ def test_permanent_redaction_removes_original_and_burns_replacement(tmp_path):
     reopened.close()
 
 
-def test_font_fitting_obeys_requested_ceiling_and_box_height():
-    small = fit_font_size("A long replacement phrase", (0, 0, 100, 20))
-    limited = fit_font_size(
-        "Short", (0, 0, 300, 80), requested_size=12
+def test_font_fitting_auto_fits_but_positive_request_is_exact():
+    automatic = fit_font_size("A long replacement phrase", (0, 0, 100, 20))
+    assert 4 <= automatic < 12
+    assert fit_font_size("Short", (0, 0, 100, 20), requested_size=0.5) == 0.5
+    assert fit_font_size("Short", (0, 0, 100, 20), requested_size=12) == 12
+    assert fit_font_size("Short", (0, 0, 100, 20), requested_size=48) == 48
+    assert fit_font_size("Short", (0, 0, 100, 20), requested_size=100) == 72
+
+
+def test_overlay_annotation_uses_the_explicit_font_size():
+    doc = fitz.open()
+    doc.new_page(width=320, height=180)
+    result = apply_scan_text_replacement(
+        doc,
+        ScanTextReplacement(
+            page_number=0,
+            rect=(35, 62, 285, 130),
+            replacement_text="X",
+            mode=MODE_OVERLAY,
+            font_size=48,
+        ),
     )
-    assert 4 <= small < 12
-    assert limited <= 12
+    page = doc[0]
+    annotation = page.first_annot
+    assert annotation is not None
+    spans = [
+        span
+        for block in annotation.get_text("dict")["blocks"]
+        if block.get("type") == 0
+        for line in block["lines"]
+        for span in line["spans"]
+    ]
+    assert result["font_size"] == 48
+    assert spans[0]["size"] == pytest.approx(48)
+    doc.close()
+
+
+def test_permanent_replacement_burns_the_explicit_font_size(tmp_path):
+    doc = _document_with_text()
+    result = apply_scan_text_replacement(
+        doc,
+        ScanTextReplacement(
+            page_number=0,
+            rect=(35, 62, 285, 96),
+            replacement_text="X",
+            mode=MODE_REDACT,
+            font_size=48,
+        ),
+    )
+    output = tmp_path / "exact_size_redaction.pdf"
+    doc.save(output, garbage=4, clean=True, deflate=True)
+    doc.close()
+
+    reopened = fitz.open(output)
+    spans = [
+        span
+        for block in reopened[0].get_text("dict")["blocks"]
+        if block.get("type") == 0
+        for line in block["lines"]
+        for span in line["spans"]
+    ]
+    assert result["font_size"] == 48
+    assert any(span["text"] == "X" and span["size"] == pytest.approx(48) for span in spans)
+    assert list(reopened[0].annots() or []) == []
+    reopened.close()
 
 
 def test_background_sampling_ignores_dark_text_on_light_page():

@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QListWidget, QMenu, QMenuBar, QSizePolicy, QToolButton, QHBoxLayout,
     QFrame, QMessageBox, QSplitter, QScrollArea, QApplication)
 from PyQt6.QtGui import QIcon, QShortcut, QKeySequence, QAction, QActionGroup, QFont
-from PyQt6.QtCore import Qt, QSize, QSettings
+from PyQt6.QtCore import Qt, QSize, QSettings, QTimer, QPoint
 from pdf_scroll_area import PDFScrollArea
 
 from app_metadata import APP_NAME
@@ -611,6 +611,8 @@ class PDFReaderUI(QMainWindow):
         self.addToolBar(Qt.ToolBarArea.TopToolBarArea, tb)
         tb.setObjectName("MarkupToolBar")
         self.markup_toolbar = tb
+        self._markup_toolbar_groups = []
+        self._markup_hidden_groups = []
 
         def _mk(btn, label, tip, checkable=True):
             btn.setText(label)
@@ -618,17 +620,39 @@ class PDFReaderUI(QMainWindow):
             btn.setCheckable(checkable)
             btn.setAutoRaise(True)
             btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextOnly)
-            tb.addWidget(btn)
+            return tb.addWidget(btn)
 
-        _pill(tb, "ANNOTATE")
-        _mk(self.annotate_button,      "📌 Note",       "Sticky note")
-        _mk(self.highlight_button,     "Highlight",     "Highlight text  (drag to select)")
-        _mk(self.underline_button,     "Underline",     "Underline text")
-        _mk(self.strikethrough_button, "Strikethrough", "Strikethrough text")
-        _mk(self.freehand_button,      "✏ Draw",        "Freehand ink")
-        _mk(self.eraser_button,        "Eraser",        "Erase nearby markup")
+        def _group(title, action_specs, *, separator=False):
+            actions = []
+            if separator:
+                actions.append(tb.addSeparator())
+            actions.append(_pill(tb, title.upper()))
+            menu_items = []
+            for btn, label, tip, checkable, menu_label in action_specs:
+                actions.append(_mk(btn, label, tip, checkable))
+                menu_items.append((btn, menu_label))
+            group = {
+                "title": title,
+                "actions": actions,
+                "menu_items": menu_items,
+            }
+            self._markup_toolbar_groups.append(group)
+            return group
 
-        # Colour swatch button
+        annotate = _group(
+            "Annotate",
+            [
+                (self.annotate_button, "📌 Note", "Sticky note", True, "Note"),
+                (self.highlight_button, "Highlight", "Highlight text  (drag to select)", True, "Highlight"),
+                (self.underline_button, "Underline", "Underline text", True, "Underline"),
+                (self.strikethrough_button, "Strikethrough", "Strikethrough text", True, "Strikethrough"),
+                (self.freehand_button, "✏ Draw", "Freehand ink", True, "Draw"),
+                (self.eraser_button, "Eraser", "Erase nearby markup", True, "Eraser"),
+            ],
+        )
+
+        # Colour swatch belongs to the Annotate group and moves into overflow
+        # with the rest of that group.
         self.markup_color_button.setText("  ◉  ")
         self.markup_color_button.setToolTip("Markup colour")
         self.markup_color_button.setAutoRaise(True)
@@ -636,21 +660,123 @@ class PDFReaderUI(QMainWindow):
         self.markup_color_button.setStyleSheet(
             "QToolButton { background:#FFFF00; border:1px solid #aaa;"
             " border-radius:3px; min-width:26px; font-size:13px; padding:1px 4px; }")
-        tb.addWidget(self.markup_color_button)
+        annotate["actions"].append(tb.addWidget(self.markup_color_button))
+        annotate["menu_items"].append((self.markup_color_button, "Markup Colour…"))
 
-        tb.addSeparator()
-        _pill(tb, "FILL & SIGN")
-        _mk(self.signature_button, "✍ Signature", "Draw and place a signature")
-        _mk(self.stamp_button,     "⬛ Stamp",      "Insert a text stamp", checkable=False)
+        _group(
+            "Fill & Sign",
+            [
+                (self.signature_button, "✍ Signature", "Draw and place a signature", True, "Signature"),
+                (self.stamp_button, "⬛ Stamp", "Insert a text stamp", False, "Stamp"),
+            ],
+            separator=True,
+        )
 
-        tb.addSeparator()
-        _pill(tb, "EDIT SCAN")
-        _mk(self.scan_text_button, "Edit Text",
-            "Drag around scanned text, OCR it, then replace it safely")
+        _group(
+            "Edit Scan",
+            [
+                (self.scan_text_button, "Edit Text",
+                 "Drag around scanned text, OCR it, then replace it safely",
+                 True, "Edit Text"),
+            ],
+            separator=True,
+        )
 
-        tb.addSeparator()
-        _pill(tb, "REDACT")
-        _mk(self.redact_button, "⬛ Redact", "Drag a box to mark text/area for redaction\nThen use Tools → Apply Redactions")
+        _group(
+            "Redact",
+            [
+                (self.redact_button, "⬛ Redact",
+                 "Drag a box to mark text/area for redaction\nThen use Tools → Apply Redactions",
+                 True, "Redact"),
+            ],
+            separator=True,
+        )
+
+        # QWidgetActions created by addWidget() are not exposed through
+        # QToolBar's native extension menu on Windows. Provide an explicit
+        # responsive overflow menu so complete tool groups never disappear.
+        self.toolbar_more_button = QToolButton()
+        self.toolbar_more_button.setText("More »")
+        self.toolbar_more_button.setToolTip("More tools")
+        self.toolbar_more_button.setAutoRaise(True)
+        self.toolbar_more_button.setPopupMode(
+            QToolButton.ToolButtonPopupMode.InstantPopup
+        )
+        self._markup_overflow_menu = QMenu(self.toolbar_more_button)
+        self.toolbar_more_button.setMenu(self._markup_overflow_menu)
+        self._markup_overflow_menu.aboutToShow.connect(
+            self._rebuild_markup_overflow_menu
+        )
+        self._markup_overflow_action = tb.addWidget(self.toolbar_more_button)
+        self._markup_overflow_action.setVisible(False)
+
+    def _markup_action_width(self, action):
+        if action.isSeparator():
+            return 8
+        widget = self.markup_toolbar.widgetForAction(action)
+        if widget is None:
+            return 0
+        return max(widget.minimumSizeHint().width(), widget.sizeHint().width()) + 2
+
+    def _markup_group_width(self, group):
+        return sum(self._markup_action_width(action) for action in group["actions"])
+
+    def _rebuild_markup_overflow_menu(self):
+        menu = getattr(self, "_markup_overflow_menu", None)
+        if menu is None:
+            return
+        menu.clear()
+        for group in getattr(self, "_markup_hidden_groups", []):
+            submenu = menu.addMenu(group["title"])
+            for button, label in group["menu_items"]:
+                action = submenu.addAction(label)
+                action.setEnabled(button.isEnabled())
+                action.setCheckable(button.isCheckable())
+                if button.isCheckable():
+                    action.setChecked(button.isChecked())
+                action.triggered.connect(
+                    lambda _checked=False, target=button: target.click()
+                )
+
+    def _update_markup_toolbar_overflow(self):
+        tb = getattr(self, "markup_toolbar", None)
+        groups = getattr(self, "_markup_toolbar_groups", None)
+        more_action = getattr(self, "_markup_overflow_action", None)
+        if tb is None or not groups or more_action is None:
+            return
+
+        # Start from the full toolbar, then move complete groups from the
+        # right-hand side into More until everything fits in the remaining
+        # main-window width.
+        for group in groups:
+            for action in group["actions"]:
+                action.setVisible(True)
+        more_action.setVisible(False)
+
+        toolbar_left = tb.mapTo(self, QPoint(0, 0)).x()
+        available = max(0, self.width() - toolbar_left - 12)
+        total = sum(self._markup_group_width(group) for group in groups)
+        hidden = []
+
+        if total > available:
+            more_width = max(58, self.toolbar_more_button.sizeHint().width()) + 8
+            remaining = total
+            for group in reversed(groups):
+                if remaining + more_width <= available:
+                    break
+                for action in group["actions"]:
+                    action.setVisible(False)
+                hidden.insert(0, group)
+                remaining -= self._markup_group_width(group)
+            more_action.setVisible(bool(hidden))
+
+        self._markup_hidden_groups = hidden
+        self._rebuild_markup_overflow_menu()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        if hasattr(self, "_markup_toolbar_groups"):
+            QTimer.singleShot(0, self._update_markup_toolbar_overflow)
 
     # =========================================================================
     # Sidebar
@@ -1074,6 +1200,8 @@ class PDFReaderUI(QMainWindow):
                 if b.text():
                     b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
         self._recolor_toolbar_icons()
+        if hasattr(self, "_markup_toolbar_groups"):
+            QTimer.singleShot(0, self._update_markup_toolbar_overflow)
 
     def _recolor_toolbar_icons(self):
         """Tint toolbar icons to the theme's text colour on dark themes so the
@@ -1378,4 +1506,4 @@ def _section_label(text: str) -> QLabel:
 def _pill(toolbar: QToolBar, text: str):
     lbl = QLabel(f" {text} ")
     lbl.setObjectName("SectionPill")
-    toolbar.addWidget(lbl)
+    return toolbar.addWidget(lbl)

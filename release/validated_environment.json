@@ -1,0 +1,23 @@
+{
+  "build": {
+    "PyInstaller": "6.21.0",
+    "pyinstaller-hooks-contrib": "2026.6",
+    "pytest": "9.1.1"
+  },
+  "captured_utc": "2026-08-06T11:50:53.760994+00:00",
+  "implementation": "CPython",
+  "optional_runtime": {},
+  "platform": "Windows-10-10.0.19045-SP0",
+  "pytest_command": ".venv\\Scripts\\python.exe -m pytest ./tests -v",
+  "python": "3.11.5",
+  "runtime": {
+    "Pillow": "12.3.0",
+    "PyMuPDF": "1.28.0",
+    "PyQt6": "6.11.0",
+    "PyQt6-Qt6": "6.11.1",
+    "PyQt6-sip": "13.11.1",
+    "pytesseract": "0.3.13"
+  },
+  "schema_version": 1,
+  "validation_required": true
+}

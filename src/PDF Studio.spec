@@ -37,7 +37,7 @@ a = Analysis(
         ('../LICENSE.txt', '.'),
         ('../NOTICE', '.'),
         ('../THIRD_PARTY_NOTICES.md', '.'),
-        ('../LICENSING_DECISION_REQUIRED.md', '.'),
+        ('../LICENSING_STRATEGY.md', '.'),
         ('../RELEASE_CHECKLIST.md', '.'),
         ('../licenses', 'licenses'),
         ('../release/build_manifest.json', 'release'),

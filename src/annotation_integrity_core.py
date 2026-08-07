@@ -10,6 +10,33 @@ from typing import Iterable, Mapping, Sequence
 import fitz
 
 
+STICKY_NOTE_ICON = "Note"
+STICKY_NOTE_STROKE = (1.0, 0.75, 0.0)
+
+
+def add_native_text_note(
+    page: fitz.Page,
+    x: float,
+    y: float,
+    text: str,
+) -> fitz.Annot:
+    """Create a standard native PDF sticky-note annotation.
+
+    The page shows only the compact note icon.  The note body remains in the
+    annotation content and is exposed by PDF viewers and PDF Studio's
+    Annotations panel rather than being painted permanently over page content.
+    """
+    annotation = page.add_text_annot(
+        fitz.Point(float(x), float(y)),
+        str(text or ""),
+        icon=STICKY_NOTE_ICON,
+    )
+    annotation.set_colors(stroke=STICKY_NOTE_STROKE)
+    annotation.set_info(title="PDF Studio", subject="Sticky Note")
+    annotation.update()
+    return annotation
+
+
 def note_identity(x: float, y: float, text: str) -> tuple[int, int, str]:
     """Return a stable-enough migration identity for legacy sticky-note tuples."""
     return (round(float(x)), round(float(y)), str(text or ""))

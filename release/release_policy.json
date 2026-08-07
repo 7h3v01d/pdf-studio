@@ -1,9 +1,11 @@
 {
   "schema_version": 1,
-  "distribution_status": "internal-development-only",
+  "distribution_status": "release-candidate-source",
   "binary_distribution_approved": false,
-  "license_strategy": "undecided",
+  "license_strategy": "agpl-gpl-compliant-source-distribution",
   "approved_by": "",
   "approved_utc": "",
-  "notes": "Public or family binary distribution is blocked until the PyMuPDF/MuPDF and PyQt6 licensing strategy is deliberately resolved."
+  "notes": "Open-source strategy selected: PDF Studio source is Apache-2.0 OR AGPL-3.0-only; official builds using GPL PyQt6 and AGPL PyMuPDF use the AGPL path. Exact locks, wheel hashes, and packaged Windows build/test evidence are complete. Public binary approval remains blocked pending clean-machine Windows 10/11 evidence, corresponding-source release packaging, and final approval metadata.",
+  "license_decision_by": "Leon Priest",
+  "license_decision_utc": "2026-08-06T07:52:00Z"
 }

@@ -6,6 +6,7 @@ import fitz
 import pytest
 
 from annotation_integrity_core import (
+    add_native_text_note,
     atomic_write_json,
     filter_legacy_sidecar_notes,
     pending_markup_only,
@@ -29,6 +30,21 @@ def test_legacy_sidecar_note_already_native_is_not_loaded_twice():
             document,
         )
         assert filtered == {0: [(80.0, 90.0, "Pending note")]}
+    finally:
+        document.close()
+
+
+def test_native_sticky_note_uses_standard_icon_and_keeps_body_in_content():
+    document = fitz.open()
+    try:
+        page = document.new_page(width=250, height=150)
+        annotation = add_native_text_note(page, 40, 50, "Private note body")
+
+        assert annotation.type[0] == fitz.PDF_ANNOT_TEXT
+        assert annotation.info["name"] == "Note"
+        assert annotation.info["content"] == "Private note body"
+        assert annotation.info["subject"] == "Sticky Note"
+        assert annotation.colors["stroke"] == pytest.approx([1.0, 0.75, 0.0])
     finally:
         document.close()
 

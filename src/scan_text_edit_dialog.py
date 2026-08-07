@@ -137,7 +137,11 @@ class ScanTextEditDialog(QDialog):
         self.font_size.setSingleStep(0.5)
         self.font_size.setSpecialValueText("Auto fit")
         self.font_size.setValue(0.0)
-        form.addRow("Font size", self.font_size)
+        self.font_size.setToolTip(
+            "Auto fit chooses the largest size that fits. A numeric value is "
+            "an exact point size; text outside the selected rectangle is clipped."
+        )
+        form.addRow("Font size (pt)", self.font_size)
 
         self.alignment = QComboBox()
         self.alignment.addItem("Left", ALIGN_LEFT)

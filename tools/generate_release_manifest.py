@@ -14,10 +14,16 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 EXCLUDED_PARTS = {
-    ".git", ".venv", ".buildenv", ".pytest_cache", "__pycache__",
-    "build", "dist", "wheelhouse",
+    ".git", ".venv", ".buildenv", ".releaseenv", ".pytest_cache", "__pycache__",
+    ".old", ".samples", "build", "dist", "wheelhouse",
 }
-EXCLUDED_NAMES = {"build_manifest.json", "wheel_manifest.json", "PACKAGE_MANIFEST.json"}
+EXCLUDED_NAMES = {
+    "build_manifest.json",
+    "artifact_manifest.json",
+    "wheel_manifest.json",
+    "PACKAGE_MANIFEST.json",
+    "New Text Document.bat",
+}
 
 
 def app_version() -> str:

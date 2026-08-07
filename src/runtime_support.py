@@ -29,9 +29,6 @@ _DEPENDENCIES = (
     "PyQt6-sip",
     "Pillow",
     "pytesseract",
-    "PyInstaller",
-    "pyinstaller-hooks-contrib",
-    "pytest",
 )
 
 
@@ -126,13 +123,35 @@ def install_exception_hook() -> None:
         sys.excepthook = _hook
 
 
-def dependency_versions(names: tuple[str, ...] = _DEPENDENCIES) -> dict[str, str]:
+def dependency_versions(
+    names: tuple[str, ...] = _DEPENDENCIES,
+    *,
+    build_manifest: Mapping[str, Any] | None = None,
+) -> dict[str, str]:
+    """Return runtime dependency versions without false negatives in a frozen build.
+
+    PyInstaller can bundle importable packages without preserving their normal
+    ``*.dist-info`` metadata. In that case ``importlib.metadata.version()``
+    raises ``PackageNotFoundError`` even though the package is present and in
+    use. The build manifest is generated immediately before packaging, so it is
+    the authoritative fallback for a frozen executable.
+    """
+    bundled_versions: Mapping[str, Any] = {}
+    if isinstance(build_manifest, Mapping):
+        candidate = build_manifest.get("dependencies")
+        if isinstance(candidate, Mapping):
+            bundled_versions = candidate
+
     versions: dict[str, str] = {}
     for name in names:
         try:
             versions[name] = metadata.version(name)
         except metadata.PackageNotFoundError:
-            versions[name] = "not installed"
+            bundled = bundled_versions.get(name)
+            if getattr(sys, "frozen", False) and bundled:
+                versions[name] = f"{bundled} (bundled)"
+            else:
+                versions[name] = "not installed"
         except Exception as exc:  # diagnostics must never crash the app
             versions[name] = f"unavailable ({type(exc).__name__})"
     return versions
@@ -145,6 +164,29 @@ def _safe_build_manifest() -> dict[str, Any] | None:
     except (OSError, ValueError, TypeError):
         return None
     return raw if isinstance(raw, dict) else None
+
+
+def _diagnostic_build_manifest(
+    manifest: Mapping[str, Any] | None,
+) -> dict[str, Any] | None:
+    """Return the support-safe build summary, excluding the full file inventory."""
+    if not isinstance(manifest, Mapping):
+        return None
+    fields = (
+        "schema_version",
+        "manifest_kind",
+        "application_version",
+        "generated_utc",
+        "python",
+        "platform",
+        "frozen_build_target",
+        "git_commit",
+        "dependencies",
+        "source_file_count",
+        "source_tree_sha256",
+        "release_policy",
+    )
+    return {field: manifest[field] for field in fields if field in manifest}
 
 
 def display_path(path: str | os.PathLike[str]) -> str:
@@ -167,6 +209,7 @@ def collect_diagnostics(
     extra: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Collect support information without reading user documents."""
+    build_manifest = _safe_build_manifest()
     info: dict[str, Any] = {
         "application": {
             "name": app_name,
@@ -190,8 +233,8 @@ def collect_diagnostics(
             "log_directory": display_path(log_directory()),
             "config_directory": display_path(config_directory()),
         },
-        "dependencies": dependency_versions(),
-        "build_manifest": _safe_build_manifest(),
+        "dependencies": dependency_versions(build_manifest=build_manifest),
+        "build_manifest": _diagnostic_build_manifest(build_manifest),
         "generated_utc": datetime.now(timezone.utc).isoformat(),
     }
     if extra:

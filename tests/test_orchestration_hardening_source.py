@@ -168,3 +168,106 @@ def test_successful_save_cleanup_failure_is_a_privacy_warning_not_save_failure()
     assert "Open Recovery Folder" in warning_source
     assert "retry_recovery_cleanup" in warning_source
     assert "Secure completion cannot be claimed" in warning_source
+
+def test_note_tool_does_not_treat_qt_checked_signal_as_force_off():
+    method = _method_node(
+        SRC / "pdf_reader_app.py", "PDFReader", "toggle_annotation_mode"
+    )
+
+    positional = [arg.arg for arg in method.args.args]
+    keyword_only = [arg.arg for arg in method.args.kwonlyargs]
+    assert positional == ["self", "_checked"]
+    assert keyword_only == ["force_off"]
+
+    # Execute just this dependency-free method body against a small fake reader.
+    module = ast.Module(body=[method], type_ignores=[])
+    namespace = {"TOOL_NONE": "none", "TOOL_ANNOTATE": "annotate"}
+    exec(
+        compile(ast.fix_missing_locations(module), "toggle_annotation_mode", "exec"),
+        namespace,
+    )
+    toggle = namespace["toggle_annotation_mode"]
+
+    class FakeReader:
+        active_tool = "none"
+        annotation_mode = False
+
+        def _sync_tool_buttons(self):
+            pass
+
+        def _update_cursor(self):
+            pass
+
+    reader = FakeReader()
+
+    # This True is exactly what QToolButton.clicked emits when pressed.
+    toggle(reader, True)
+    assert reader.active_tool == "annotate"
+    assert reader.annotation_mode is True
+
+    toggle(reader, False)
+    assert reader.active_tool == "none"
+    assert reader.annotation_mode is False
+
+    reader.active_tool = "annotate"
+    reader.annotation_mode = True
+    toggle(reader, force_off=True)
+    assert reader.active_tool == "none"
+    assert reader.annotation_mode is False
+
+
+def test_pending_sticky_note_renders_icon_without_page_text_body():
+    render_method = _method_node(
+        SRC / "pdf_reader_app.py", "PDFReader", "render_page_content"
+    )
+    render_source = ast.unparse(render_method)
+    assert "_draw_pending_sticky_note_icon" in render_source
+    assert "TextWordWrap" not in render_source
+    assert "font.setPointSize(11)" not in render_source
+
+    icon_method = _method_node(
+        SRC / "pdf_reader_app.py", "PDFReader", "_draw_pending_sticky_note_icon"
+    )
+    icon_source = ast.unparse(icon_method)
+    assert "drawRoundedRect" in icon_source
+    assert "drawText" not in icon_source
+
+
+def test_sticky_notes_can_be_opened_from_page_and_annotations_panel():
+    app_source = (SRC / "pdf_reader_app.py").read_text(encoding="utf-8")
+    panel_source = (SRC / "annotations_panel.py").read_text(encoding="utf-8")
+    assert "_open_sticky_note_at" in app_source
+    assert "_show_sticky_note" in app_source
+    assert "open_annotation" in panel_source
+    assert "Open Sticky Note" in panel_source
+
+
+
+def test_signature_fields_do_not_overlay_page_click_target_and_snap_visual_signature():
+    app_source = (SRC / "pdf_reader_app.py").read_text(encoding="utf-8")
+    assert "unsigned_signature_field_at" in app_source
+    assert "fit_signature_inside" in app_source
+    assert "Do not cover them with an opaque disabled Qt" in app_source
+
+    render_method = _method_node(
+        SRC / "pdf_reader_app.py", "PDFReader", "_render_form_fields"
+    )
+    render_source = ast.unparse(render_method)
+    assert "PDF_WIDGET_TYPE_SIGNATURE" in render_source
+    assert "continue" in render_source
+
+
+def test_markup_toolbar_has_responsive_group_overflow_menu():
+    ui_source = (SRC / "pdf_reader_ui.py").read_text(encoding="utf-8")
+    assert 'setText("More »")' in ui_source
+    assert "_update_markup_toolbar_overflow" in ui_source
+    assert "_rebuild_markup_overflow_menu" in ui_source
+    assert '"Fill & Sign"' in ui_source
+    assert '"Edit Scan"' in ui_source
+    assert '"Redact"' in ui_source
+
+    resize_method = _method_node(
+        SRC / "pdf_reader_ui.py", "PDFReaderUI", "resizeEvent"
+    )
+    resize_source = ast.unparse(resize_method)
+    assert "_update_markup_toolbar_overflow" in resize_source

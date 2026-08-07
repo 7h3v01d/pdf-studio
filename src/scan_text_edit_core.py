@@ -104,23 +104,28 @@ def fit_font_size(
     horizontal_padding: float = 4.0,
     vertical_padding: float = 3.0,
 ) -> float:
-    """Return a conservative Helvetica size that fits the supplied rectangle."""
+    """Resolve the Helvetica point size for a replacement.
+
+    ``requested_size == 0`` means auto-fit. Any positive value is an explicit
+    point size (up to ``maximum``) and must not be silently reduced to fit the
+    selection; the PDF annotation clips oversized text to its rectangle, matching
+    the dialog
+    preview and normal font-size control semantics.
+    """
+    if requested_size > 0:
+        return round(min(float(requested_size), maximum), 2)
+
     box = fitz.Rect(rect)
     usable_width = max(1.0, box.width - horizontal_padding * 2)
     usable_height = max(1.0, box.height - vertical_padding * 2)
     lines = str(text or "").splitlines() or [""]
     font = fitz.Font(fontname="helv")
 
-    if requested_size > 0:
-        ceiling = min(float(requested_size), maximum)
-    else:
-        ceiling = maximum
-
     longest_at_one = max(font.text_length(line or " ", fontsize=1.0) for line in lines)
     width_limit = usable_width / max(longest_at_one, 0.01)
     line_height_factor = 1.25
     height_limit = usable_height / max(len(lines) * line_height_factor, 0.01)
-    return round(max(minimum, min(ceiling, width_limit, height_limit)), 2)
+    return round(max(minimum, min(maximum, width_limit, height_limit)), 2)
 
 
 def sample_background_rgb(image, *, border_fraction: float = 0.12) -> tuple[float, float, float]:
@@ -262,6 +267,47 @@ def ocr_text_and_confidence(data: dict) -> tuple[str, float]:
     )
     return text, confidence
 
+
+def _burn_freetext_appearance(
+    page: fitz.Page,
+    rect: fitz.Rect,
+    text: str,
+    *,
+    fontsize: float,
+    alignment: int,
+    text_color: tuple[float, float, float],
+) -> None:
+    """Burn one exact-size FreeText appearance into ``page``.
+
+    Baking is deliberately isolated in a temporary one-page document. Calling
+    ``Document.bake()`` on the active document would flatten unrelated user
+    annotations and form widgets across the PDF.
+    """
+    appearance_document = fitz.open()
+    try:
+        appearance_page = appearance_document.new_page(
+            width=page.rect.width,
+            height=page.rect.height,
+        )
+        annotation = appearance_page.add_freetext_annot(
+            rect,
+            text,
+            fontsize=fontsize,
+            fontname="Helv",
+            text_color=text_color,
+            fill_color=None,
+            border_color=None,
+            border_width=0,
+            opacity=1,
+            align=alignment,
+        )
+        annotation.update()
+        appearance_document.bake(annots=True, widgets=False)
+        page.show_pdf_page(page.rect, appearance_document, 0, overlay=True)
+    finally:
+        appearance_document.close()
+
+
 def apply_scan_text_replacement(
     document: fitz.Document,
     plan: ScanTextReplacement,
@@ -314,14 +360,13 @@ def apply_scan_text_replacement(
             "reversible": True,
         }
 
+    # PyMuPDF's built-in redaction replacement silently shrinks large font
+    # sizes until the text fits. Apply the destructive redaction without text,
+    # then burn an isolated FreeText appearance into the page so an explicit
+    # point size remains exact and oversized text is clipped predictably.
     redact = page.add_redact_annot(
         rect,
-        text=clean.replacement_text,
-        fontname="helv",
-        fontsize=fontsize,
-        align=clean.alignment,
         fill=clean.background_color,
-        text_color=clean.text_color,
         cross_out=False,
     )
     redact.set_info(
@@ -335,6 +380,14 @@ def apply_scan_text_replacement(
     except TypeError:
         # Older supported PyMuPDF builds did not expose every keyword.
         page.apply_redactions(images=2)
+    _burn_freetext_appearance(
+        page,
+        rect,
+        clean.replacement_text,
+        fontsize=fontsize,
+        alignment=clean.alignment,
+        text_color=clean.text_color,
+    )
     return {
         "mode": MODE_REDACT,
         "page_number": clean.page_number,

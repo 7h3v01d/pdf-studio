@@ -54,9 +54,11 @@ class AnnotationsPanel(QWidget):
     Sidebar panel: lists all annotations.
     Signals:
         jump_to_page(int)         – scroll viewer to this 0-based page
+        open_annotation(dict)     – open note content or annotation details
         delete_annotation(dict)   – caller should remove this annotation
     """
     jump_to_page      = pyqtSignal(int)
+    open_annotation   = pyqtSignal(dict)
     delete_annotation = pyqtSignal(dict)
 
     def __init__(self, parent=None):
@@ -151,7 +153,7 @@ class AnnotationsPanel(QWidget):
                     "source":   "note",
                     "type":     "note",
                     "page":     page_num,
-                    "text":     text[:80],
+                    "text":     text,
                     "x": x, "y": y,
                 })
 
@@ -216,7 +218,7 @@ class AnnotationsPanel(QWidget):
                     "type":    atype,
                     "page":    page_num,
                     "annot_xref": annot.xref,
-                    "text":    content[:80] if content else annot.type[1],
+                    "text":    content if content else annot.type[1],
                 })
 
         # Sort by page then source
@@ -240,11 +242,12 @@ class AnnotationsPanel(QWidget):
         emoji, colour = TYPE_META.get(itype, ("◆", MID))
         page_num = data["page"]
         text     = data.get("text", "")
+        preview  = text[:80] + ("…" if len(text) > 80 else "")
 
         # Display text: "p.3  ▌  Highlight text preview…"
         display = f"p.{page_num + 1}   {emoji}  {_type_label(itype)}"
-        if text:
-            display += f"\n      {text}"
+        if preview:
+            display += f"\n      {preview}"
 
         item = QListWidgetItem(display)
         item.setData(Qt.ItemDataRole.UserRole, len(self._items_data) - 1)
@@ -260,8 +263,11 @@ class AnnotationsPanel(QWidget):
         idx  = item.data(Qt.ItemDataRole.UserRole)
         if idx is None or idx >= len(self._items_data):
             return
-        page = self._items_data[idx]["page"]
+        data = self._items_data[idx]
+        page = data["page"]
         self.jump_to_page.emit(page)
+        if data.get("type") in ("note", "pdf_text"):
+            self.open_annotation.emit(dict(data))
 
     def _on_context_menu(self, pos):
         item = self.list_widget.itemAt(pos)
@@ -280,6 +286,9 @@ class AnnotationsPanel(QWidget):
             QMenu::item:selected { background: #dbeafe; color: #1e40af; }
         """)
         go_act  = menu.addAction(f"▶  Go to Page {data['page'] + 1}")
+        open_act = None
+        if data.get("type") in ("note", "pdf_text"):
+            open_act = menu.addAction("📝  Open Sticky Note")
         menu.addSeparator()
         del_act = menu.addAction("🗑  Delete This Annotation")
         del_act.setStyleSheet(f"color: {DANGER};")
@@ -287,6 +296,9 @@ class AnnotationsPanel(QWidget):
         chosen = menu.exec(self.list_widget.mapToGlobal(pos))
         if chosen == go_act:
             self.jump_to_page.emit(data["page"])
+        elif open_act is not None and chosen == open_act:
+            self.jump_to_page.emit(data["page"])
+            self.open_annotation.emit(dict(data))
         elif chosen == del_act:
             self.delete_annotation.emit(data)
 

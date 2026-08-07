@@ -75,6 +75,7 @@ from scan_text_edit_core import (
 )
 from scan_text_edit_dialog import ScanTextEditDialog
 from scan_text_edit_worker import ScanTextOCRWorker
+from signature_placement_core import fit_signature_inside, unsigned_signature_field_at
 from tesseract_setup import configure_tesseract
 from document_integrity_core import (
     apply_redactions_transactionally,
@@ -89,6 +90,7 @@ from document_integrity_core import (
     validate_pdf_file,
 )
 from annotation_integrity_core import (
+    add_native_text_note,
     atomic_write_json,
     pending_markup_only,
     retire_baked_sidecar_state,
@@ -139,6 +141,7 @@ FORM_CREATE_TOOLS = {
 
 # Default on-page signature width in PDF points (aspect ratio preserved).
 DEFAULT_SIG_WIDTH_PT = 200
+STICKY_NOTE_SIZE_PT = 18.0
 
 
 class PDFReader(PDFReaderUI):
@@ -293,6 +296,7 @@ class PDFReader(PDFReaderUI):
         # ── Thumbnail drag reorder ────────────────────────────────────────
         # Annotations panel signals
         self.annot_panel.jump_to_page.connect(self._annot_panel_jump)
+        self.annot_panel.open_annotation.connect(self._annot_panel_open)
         self.annot_panel.delete_annotation.connect(self._annot_panel_delete)
 
         self.thumbnail_list.model().rowsMoved.connect(
@@ -1068,9 +1072,7 @@ class PDFReader(PDFReaderUI):
                     existing_positions.add((round(pos.x), round(pos.y)))
             for x, y, text in items:
                 if (round(x), round(y)) not in existing_positions:
-                    annot = page.add_text_annot(fitz.Point(x, y), text)
-                    annot.set_colors(stroke=(1, 0.6, 0))
-                    annot.update()
+                    add_native_text_note(page, x, y, text)
 
         # Signature images and stamps use immediate PDF persistence and are not
         # replayed from the sidecar during save preparation.
@@ -1599,13 +1601,26 @@ class PDFReader(PDFReaderUI):
         # Click/drop point -> PDF coordinates
         pdf_pt = fitz.Point(click_x, click_y) * inv
 
-        # Size in PDF points, aspect-preserved, capped to half the page width
-        aspect = (pix.height() / pix.width()) if pix.width() else 0.3
+        # Signature fields are placement targets for visual signatures. Snap
+        # into the field without replacing or flattening the genuine PDF form
+        # widget. Ordinary page placement keeps the existing free-position
+        # behaviour.
         page = self.pdf_document.load_page(page_num)
-        max_w = page.rect.width * 0.5
-        sig_w = min(DEFAULT_SIG_WIDTH_PT, max_w)
-        sig_h = sig_w * aspect
-        pdf_rect = fitz.Rect(pdf_pt.x, pdf_pt.y, pdf_pt.x + sig_w, pdf_pt.y + sig_h)
+        field_target = unsigned_signature_field_at(
+            self.pdf_document, page_num, pdf_pt
+        )
+        if field_target is not None:
+            pdf_rect = fit_signature_inside(
+                field_target.rect, pix.width(), pix.height()
+            )
+        else:
+            aspect = (pix.height() / pix.width()) if pix.width() else 0.3
+            max_w = page.rect.width * 0.5
+            sig_w = min(DEFAULT_SIG_WIDTH_PT, max_w)
+            sig_h = sig_w * aspect
+            pdf_rect = fitz.Rect(
+                pdf_pt.x, pdf_pt.y, pdf_pt.x + sig_w, pdf_pt.y + sig_h
+            )
 
         # Pixmap → PNG bytes
         from PyQt6.QtCore import QBuffer, QIODevice
@@ -1652,7 +1667,12 @@ class PDFReader(PDFReaderUI):
         self._update_undo_redo_labels()
         self._mark_modified()
         self.render_page_content(page_num, page_widget)
-        self.status_bar.showMessage("Signature placed once. Save to persist it.")
+        if field_target is not None:
+            self.status_bar.showMessage(
+                "Signature fitted to the signature field. Save to persist it."
+            )
+        else:
+            self.status_bar.showMessage("Signature placed once. Save to persist it.")
 
     @staticmethod
     def _first_image_url(mime):
@@ -1847,6 +1867,40 @@ class PDFReader(PDFReaderUI):
     # Rendering
     # =========================================================================
 
+    def _pending_sticky_note_screen_rect(self, x: float, y: float) -> QRectF:
+        """Return the on-screen icon rectangle for a deferred sticky note."""
+        matrix = fitz.Matrix(
+            self.zoom_level, self.zoom_level
+        ).prerotate(self.rotation)
+        screen_point = fitz.Point(float(x), float(y)) * matrix
+        size = max(12.0, STICKY_NOTE_SIZE_PT * self.zoom_level)
+        return QRectF(screen_point.x, screen_point.y, size, size)
+
+    def _draw_pending_sticky_note_icon(
+        self,
+        painter: QPainter,
+        x: float,
+        y: float,
+    ) -> None:
+        """Paint only a compact sticky-note icon, never its body text."""
+        rect = self._pending_sticky_note_screen_rect(x, y)
+        size = rect.width()
+        painter.save()
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            painter.setPen(QPen(QColor("#9a6700"), max(1.0, size / 18.0)))
+            painter.setBrush(QColor("#facc15"))
+            painter.drawRoundedRect(rect, 2.0, 2.0)
+
+            painter.setPen(QPen(QColor("#7c5a00"), max(1.0, size / 24.0)))
+            left = rect.left() + size * 0.23
+            right = rect.right() - size * 0.23
+            for fraction in (0.38, 0.56, 0.74):
+                line_y = rect.top() + size * fraction
+                painter.drawLine(int(left), int(line_y), int(right), int(line_y))
+        finally:
+            painter.restore()
+
     def render_page_content(self, page_num, widget):
         if not self.pdf_document:
             return
@@ -1877,17 +1931,8 @@ class PDFReader(PDFReaderUI):
 
                 # ── Sticky-note annotations ───────────────────────────────
                 if page_num in self.annotations:
-                    pen = QPen(QColor(255, 140, 0), 2)
-                    painter.setPen(pen)
-                    font = painter.font()
-                    font.setPointSize(11)
-                    painter.setFont(font)
-                    for x, y, text in self.annotations[page_num]:
-                        sx = x * self.zoom_level
-                        sy = y * self.zoom_level
-                        painter.drawText(int(sx) - 10, int(sy) - 10, "📌")
-                        painter.drawText(QRectF(sx, sy, 220, 60),
-                                         Qt.TextFlag.TextWordWrap, text)
+                    for x, y, _text in self.annotations[page_num]:
+                        self._draw_pending_sticky_note_icon(painter, x, y)
 
                 # ── In-progress freehand stroke ───────────────────────────
                 if (self._freehand_drawing and
@@ -2998,16 +3043,13 @@ class PDFReader(PDFReaderUI):
                         field, "Multi-select form detected; this release saves one selection"))
 
             elif ftype == fitz.PDF_WIDGET_TYPE_SIGNATURE:
-                kind = widget_custom_kind(self.pdf_document, int(field.xref))
-                unsigned_label = "Initials field" if kind == KIND_INITIALS else "Signature field"
-                qt_widget = QPushButton(
-                    "Signed" if bool(getattr(field, "is_signed", False)) else unsigned_label,
-                    widget,
-                )
-                qt_widget.setGeometry(x, y, width, height)
-                qt_widget.setEnabled(False)
-                qt_widget.setToolTip(self._field_tooltip(
-                    field, "Detected; cryptographic PDF signing is not yet supported"))
+                # Signature fields are already rendered by PyMuPDF as part of
+                # the page. Do not cover them with an opaque disabled Qt
+                # button: that overlay intercepted click-to-place signatures
+                # and also hid visual signatures inserted into the field.
+                # The real PDF field remains intact and is still listed in the
+                # Forms panel.
+                continue
 
             elif ftype == fitz.PDF_WIDGET_TYPE_BUTTON:
                 caption = getattr(field, "button_caption", None) or "PDF button"
@@ -3538,6 +3580,59 @@ class PDFReader(PDFReaderUI):
         except ValueError:
             return None
 
+    def _show_sticky_note(self, text: str, page_num: int) -> None:
+        """Open a readable sticky-note popup without painting text on the page."""
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"Sticky Note — Page {page_num + 1}")
+        dialog.setMinimumSize(380, 240)
+
+        layout = QVBoxLayout(dialog)
+        body = QTextEdit(dialog)
+        body.setReadOnly(True)
+        body.setPlainText(str(text or ""))
+        body.setStyleSheet(
+            "QTextEdit { background: #fff8c5; border: 1px solid #d6a700; "
+            "border-radius: 4px; padding: 8px; color: #3f3300; }"
+        )
+        layout.addWidget(body)
+
+        close_button = QPushButton("Close", dialog)
+        close_button.clicked.connect(dialog.accept)
+        row = QHBoxLayout()
+        row.addStretch()
+        row.addWidget(close_button)
+        layout.addLayout(row)
+        dialog.exec()
+
+    def _open_sticky_note_at(self, page_num: int, px: float, py: float) -> bool:
+        """Open a pending or native sticky note hit by a page click."""
+        for x, y, text in reversed(self.annotations.get(page_num, [])):
+            rect = self._pending_sticky_note_screen_rect(x, y)
+            if rect.left() <= px <= rect.right() and rect.top() <= py <= rect.bottom():
+                self._show_sticky_note(text, page_num)
+                return True
+
+        pdf_point = self._to_pdf_point(px, py)
+        if pdf_point is None or not (0 <= page_num < self.pdf_document.page_count):
+            return False
+        page = self.pdf_document.load_page(page_num)
+        hit_margin = max(2.0, 4.0 / max(self.zoom_level, 0.01))
+        for annotation in page.annots() or []:
+            if annotation.type[0] != fitz.PDF_ANNOT_TEXT:
+                continue
+            rect = fitz.Rect(annotation.rect)
+            rect.x0 -= hit_margin
+            rect.y0 -= hit_margin
+            rect.x1 += hit_margin
+            rect.y1 += hit_margin
+            if rect.contains(pdf_point):
+                self._show_sticky_note(
+                    (annotation.info or {}).get("content", ""),
+                    page_num,
+                )
+                return True
+        return False
+
     def _handle_page_mouse_press(self, event, page_widget):
         page_num = page_widget.property("page_num")
         self.current_page = page_num
@@ -3620,6 +3715,14 @@ class PDFReader(PDFReaderUI):
             self.selection_end_point = event.position().toPoint()
             self.current_selection_page = page_num
             self.update_view()
+            return
+
+        # ── Open an existing sticky note ────────────────────────────────
+        if (
+            btn == Qt.MouseButton.LeftButton
+            and self.active_tool == TOOL_NONE
+            and self._open_sticky_note_at(page_num, px, py)
+        ):
             return
 
         # ── Text selection ────────────────────────────────────────────────
@@ -4188,7 +4291,13 @@ class PDFReader(PDFReaderUI):
     # Annotation mode (back-compat shim → routes to active_tool)
     # =========================================================================
 
-    def toggle_annotation_mode(self, force_off=False):
+    def toggle_annotation_mode(self, _checked=False, *, force_off=False):
+        """Toggle the sticky-note tool without treating Qt's checked signal as force-off.
+
+        QToolButton.clicked emits a positional ``checked`` boolean.  Keep that
+        value separate from the explicit keyword-only ``force_off`` control used
+        by document-reset code.
+        """
         if force_off:
             if self.active_tool == TOOL_ANNOTATE:
                 self.active_tool = TOOL_NONE
@@ -4266,6 +4375,28 @@ class PDFReader(PDFReaderUI):
             self.update_ui_on_page_change()
             if self.view_mode == self.CONTINUOUS:
                 self.scroll_to_page(page)
+
+    def _annot_panel_open(self, data: dict):
+        """Open sticky-note content selected in the Annotations panel."""
+        page = int(data.get("page", -1))
+        if not self.pdf_document or not (0 <= page < self.total_pages):
+            return
+
+        source = data.get("source")
+        if source == "note":
+            self._show_sticky_note(data.get("text", ""), page)
+            return
+
+        if source == "pdf" and data.get("type") == "pdf_text":
+            xref = data.get("annot_xref")
+            pdf_page = self.pdf_document.load_page(page)
+            for annotation in pdf_page.annots() or []:
+                if annotation.xref == xref:
+                    self._show_sticky_note(
+                        (annotation.info or {}).get("content", ""),
+                        page,
+                    )
+                    return
 
     def _annot_panel_delete(self, data: dict):
         """Remove an annotation from its single authoritative backing store."""
