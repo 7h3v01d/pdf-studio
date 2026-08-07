@@ -1,0 +1,44 @@
+# Python environments
+.venv/
+.buildenv/
+.releaseenv/
+
+# Python/test caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Build outputs
+src/build/
+src/dist/
+build/
+dist/
+
+# Reproducible-build wheel cache (generated from committed lock files)
+release/wheelhouse/
+
+# Generated build/release artifacts
+release/build_manifest.json
+release/artifact_manifest.json
+PACKAGE_MANIFEST.json
+
+# Local archives / patches
+/*.zip
+/*.zip.sha256
+/*.patch
+
+# Local/editor/OS noise
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Local logs
+*.log
