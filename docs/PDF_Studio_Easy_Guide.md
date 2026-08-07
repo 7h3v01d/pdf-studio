@@ -2,7 +2,7 @@
 
 A simple guide to reading, filling in, and signing documents.
 
-> **Release-candidate source:** suitable for controlled beta use. Public binaries still require packaged Windows and release-evidence approval.
+**Version 3.2.0-alpha12**
 
 ---
 
@@ -37,7 +37,8 @@ comfortably, and the program will remember it next time.
 When PDF Studio starts, its red startup picture appears for about five seconds.
 This is normal. The main window opens automatically when the picture fades away.
 
-**The easy way:** double-click any PDF file. It will open in PDF Studio.
+**The easy way:** if PDF Studio is your default PDF app, double-click any PDF file.
+Otherwise, use **Open with → PDF Studio** or open the file from inside the program.
 
 **From inside the program:** click **Open** on the toolbar (top-left).
 
@@ -66,6 +67,9 @@ treats the hidden temporary conversion as your saved document.
 The panel on the left shows the **Contents**, your **Bookmarks**, any **notes**
 you have made, any **form fields**, and small **pictures of each page**. Click a page picture to jump
 straight to it.
+
+If the window is narrow, some right-hand toolbar groups move under **More »**.
+Nothing has disappeared; widen the window and the groups return to the toolbar.
 
 ---
 
@@ -136,7 +140,8 @@ editing hidden original letters.
    Studio reads only that small area. This first version reads
    English automatically; for other languages, type the replacement manually.
 4. Check the recognised text and type the corrected version.
-5. Leave **Auto fit** on unless the preview text is too large or too small.
+5. Leave **Auto fit** on for automatic sizing. If you choose a number instead,
+   PDF Studio uses that exact point size.
 6. Check the preview, then choose one of these:
    - **Reversible white-out overlay** - safest and recommended. The original scan
      stays underneath, `Ctrl+Z` works, and the replacement can be deleted from

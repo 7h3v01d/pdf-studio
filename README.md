@@ -16,11 +16,14 @@ PDF Studio source: **Apache-2.0 OR AGPL-3.0-only**. Official open-source builds 
 | | |
 |---|---|
 | **Version** | `3.2.0-alpha12` |
-| **Status** | Release-candidate source — packaged Windows build validated; clean-machine evidence pending |
+| **Status** | Windows release candidate — packaged build validated; clean-machine release evidence pending |
 | **Primary platform** | Windows 10 / 11 |
 | **Python** | 3.11 for the supported build workflow |
 | **Automated tests** | 141 passing on the validated Windows build |
 | **OCR engine** | Tesseract, detected automatically without editing PATH |
+
+Windows 10/11 is the supported and release-validated platform. Other platforms may
+run from source, but they are not part of the 3.2.0-alpha12 release validation.
 
 The current release closes the last confidentiality gap in save recovery. Original
 transaction backups now live under PDF Studio's controlled local application-data

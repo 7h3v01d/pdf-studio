@@ -135,8 +135,9 @@ def build():
     s.append(Paragraph("PDF Studio", S_TITLE))
     s.append(Paragraph("Easy Guide — reading, filling in, and signing documents",
                        S_SUB))
-    s.append(TIP("Release-candidate source: suitable for controlled beta use. "
-                 "Public binaries still require packaged Windows and release-evidence approval."))
+    s.append(Paragraph("Version 3.2.0-alpha12",
+                       ParagraphStyle("ver", parent=S_SUB, fontSize=10.5, leading=14,
+                                      textColor=HexColor("#5f6670"), spaceAfter=8)))
 
     # 1. Comfort
     s.append(H1("Making it comfortable to read"))
@@ -163,8 +164,9 @@ def build():
     s.append(P("When PDF Studio starts, its red startup picture appears for "
                "about five seconds. This is normal. The main window opens "
                "automatically when the picture fades away."))
-    s.append(P("<b>The easy way:</b> double-click any PDF file. It will open in "
-               "PDF Studio."))
+    s.append(P("<b>The easy way:</b> if PDF Studio is your default PDF app, "
+               "double-click any PDF file. Otherwise use <b>Open with → PDF Studio</b> "
+               "or open the file from inside the program."))
     s.append(P("<b>From inside the program:</b> click <b>Open</b> on the "
                "toolbar, at the top-left."))
     s.append(P("You can also open <b>Word</b> documents and <b>Excel</b> "
@@ -188,6 +190,9 @@ def build():
                "<b>Bookmarks</b>, any <b>notes</b>, any <b>form fields</b>, and "
                "small <b>pictures of each page</b>. Click a page picture or form "
                "field to jump straight to it."))
+    s.append(TIP("If the window is narrow, some right-hand toolbar groups move under "
+                 "<b>More »</b>. Nothing has disappeared; widen the window and the "
+                 "groups return to the toolbar."))
 
     # 4. Forms
     s.append(H1("Filling in a form"))
@@ -253,8 +258,8 @@ def build():
                      "This first version reads English automatically; for other "
                      "languages, type the replacement manually."))
     s.append(STEP(4, "Check the recognised text and type the corrected version."))
-    s.append(STEP(5, "Leave <b>Auto fit</b> on unless the preview is too large "
-                     "or too small."))
+    s.append(STEP(5, "Leave <b>Auto fit</b> on for automatic sizing. If you "
+                     "choose a number instead, PDF Studio uses that exact point size."))
     s.append(STEP(6, "Choose <b>Reversible white-out overlay</b> for the safest "
                      "correction, or permanent mode only when you are sure."))
     s.append(STEP(7, "Click <b>Apply Replacement</b>."))

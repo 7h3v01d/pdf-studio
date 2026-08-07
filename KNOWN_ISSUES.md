@@ -1,8 +1,10 @@
 # PDF Studio 3.2.0-alpha12 — Known Issues and Release Gates
 
-This build is a **release-candidate source for controlled beta testing**. The
-licensing strategy is selected, but a public GitHub binary is not yet approved
-until reproducible-build and clean-machine evidence is complete.
+This build is a **Windows release candidate**. Reproducible dependency locks,
+the verified wheelhouse, the packaged Windows build, diagnostics, release manifests,
+and the 141-test Windows suite have passed. Public binary publication remains
+fail-closed until clean Windows 10/11 evidence, matching corresponding-source release
+packaging, and final approval are recorded.
 
 ## Corrected in alpha7
 
@@ -77,16 +79,26 @@ until reproducible-build and clean-machine evidence is complete.
 - Stale-cache cleanup requires a valid ownership marker and removes the complete workspace only after the configured age threshold.
 
 
-## Remaining release gates
+## Known limitations
 
-1. Add packaged-GUI integration tests for real close prompts, worker cancellation,
-   file-dialog overwrite flows, and rollback recovery on Windows.
-2. Extend atomic output to any optional conversion backend added in future and
-   maintain disk-full / permission-denied fault-injection tests.
-3. Run the exact-version capture and wheelhouse preparation on the final validated Windows build environment, then archive the resulting manifests.
-4. Implement the selected AGPL/GPL release delivery plan: exact source archive, dependency locks and hashes, bundled notices, and corresponding-source information.
-5. Run clean Windows 10 and Windows 11 virtual-machine installation, upgrade, file association, OCR, diagnostics/logging, and uninstall tests.
-6. Raise coverage specifically across the real PyQt controller and packaged startup path; the current suite is much stronger but still core-heavy.
-7. Add code signing and installer provenance before a public download is labelled release-ready.
+- PDF signature fields can receive PDF Studio's visual drawn/imported signatures, but
+  PDF Studio does **not** perform certificate-backed cryptographic PDF signing.
+- PDF push-button actions and embedded PDF JavaScript are not executed.
+- Multi-select list boxes are detected, but this release saves one selected item.
+- Microsoft Office/LibreOffice, Tesseract, and optional export backends remain
+  external dependencies where documented.
 
-See the adversarial review and the alpha7 through alpha12 changelogs for remediation history.
+## Remaining public-release gates
+
+1. Run and record the clean Windows 10 and Windows 11 machine checklist against the
+   final executable SHA-256.
+2. Package the exact corresponding source for that executable together with build
+   scripts, dependency locks, wheel manifest/hashes, notices, licence texts, and the
+   corresponding-source information required by `LICENSING_STRATEGY.md`.
+3. Record the final approver and UTC approval timestamp in
+   `release/release_policy.json`, then run the public-release audit/build path.
+
+Code signing is recommended release polish, but it is not currently an enforced
+`release_audit.py` gate.
+
+See the README changelog for the alpha7-through-alpha12 remediation history.

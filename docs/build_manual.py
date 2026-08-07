@@ -243,11 +243,11 @@ def cover():
     s.append(rule)
     s.append(Spacer(1, 20))
     meta = ParagraphStyle("cm", fontName=BODY, fontSize=11.5, leading=19, textColor=MUTED)
-    s.append(Paragraph("Version 3.2-alpha12", meta))
-    s.append(Paragraph("Release-candidate source - packaged release evidence in progress", meta))
+    s.append(Paragraph("Version 3.2.0-alpha12", meta))
+    s.append(Paragraph("Windows release candidate - packaged build validated", meta))
     s.append(Spacer(1, 14))
     s.append(Paragraph("Leon Priest &nbsp;·&nbsp; github.com/7h3v01d", meta))
-    s.append(Paragraph("Source: Apache-2.0 OR AGPL-3.0-only; public binary evidence pending", meta))
+    s.append(Paragraph("Source: Apache-2.0 OR AGPL-3.0-only; clean-machine/final approval pending", meta))
     s.append(PageBreak())
     return s
 
@@ -278,7 +278,7 @@ def _later(canvas, doc):
     canvas.setFont(BODY, 8.5)
     canvas.setFillColor(MUTED)
     canvas.drawString(22 * mm, 285 * mm, "PDF Studio — User Manual")
-    canvas.drawRightString(188 * mm, 285 * mm, "Version 3.2-alpha12")
+    canvas.drawRightString(188 * mm, 285 * mm, "Version 3.2.0-alpha12")
     canvas.setStrokeColor(HexColor("#dfe3e8"))
     canvas.line(22 * mm, 282 * mm, 188 * mm, 282 * mm)
     canvas.line(22 * mm, 16 * mm, 188 * mm, 16 * mm)

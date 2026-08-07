@@ -5,8 +5,9 @@
 PyQt6 and PyMuPDF editions use the AGPL option for PDF Studio code and remain
 subject to all applicable GPLv3/AGPLv3 obligations.
 
-**Public binary status:** not yet approved. Reproducible-build, dependency,
-clean-machine, and final approval evidence remain outstanding.
+**Public binary status:** not yet approved. Exact locks/hashes and the packaged
+Windows build/test evidence are complete. Clean Windows 10/11 evidence, matching
+corresponding-source release packaging, and final approval remain outstanding.
 
 This file is an engineering inventory, not legal advice. A distributor must
 review the exact package versions and licence texts included in the final build.

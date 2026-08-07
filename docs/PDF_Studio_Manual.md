@@ -1,6 +1,6 @@
 # PDF Studio — User Manual
 
-**Version 3.2-alpha12** · Release-candidate source · `Apache-2.0 OR AGPL-3.0-only`
+**Version 3.2.0-alpha12** · Windows release candidate · `Apache-2.0 OR AGPL-3.0-only`
 Leon Priest — [github.com/7h3v01d](https://github.com/7h3v01d)
 
 ---
@@ -43,11 +43,12 @@ paywall. Source code authored by Leon Priest is available under
 `Apache-2.0 OR AGPL-3.0-only`. Official builds using GPL PyQt6 and AGPL
 PyMuPDF use the AGPL option for PDF Studio code.
 
-> **Release-candidate source:** version 3.2-alpha12 includes the completed
-> integrity-remediation passes and a selected open-source licensing path. Save
-> recovery verifies deletion of original transaction copies and warns whenever
-> sensitive backups remain. Packaged-GUI, dependency-lock, corresponding-source,
-> clean-machine, and final approval gates remain. See `KNOWN_ISSUES.md`.
+> **Release-candidate status:** version 3.2.0-alpha12 has completed the
+> integrity-remediation work, reproducible dependency locking, verified wheelhouse,
+> packaged Windows build, diagnostics validation, and the 141-test Windows suite.
+> Public binary publication remains deliberately blocked until clean Windows 10/11
+> evidence, matching corresponding-source release packaging, and final approval are
+> recorded. See `KNOWN_ISSUES.md` and `RELEASE_CHECKLIST.md`.
 
 **Highlights**
 
@@ -68,8 +69,10 @@ PyMuPDF use the AGPL option for PDF Studio code.
 
 ### Requirements
 
-- Windows 10 or 11 (the app also runs on Linux/macOS from source)
-- Python 3.11 *(only if running from source; required by the validated build workflow)*
+- **Supported and release-validated:** Windows 10 / 11, 64-bit
+- Python 3.11 *(only when running or building from source)*
+
+Other platforms may run from source, but they are not part of the validated 3.2.0-alpha12 release path.
 
 ### Option A — Run the built executable
 
@@ -80,13 +83,18 @@ be loaded, PDF Studio continues with a normal launch.
 
 ### Option B — Run from source
 
-```bash
-cd PDF_Studio/src
-python -m venv .venv
-.venv\Scripts\activate          # Windows
-pip install -r ../requirements.txt
-python pdf_reader.py
+For the supported Windows setup, open the project root and run:
+
+```bat
+setup.bat
+run.bat
 ```
+
+`setup.bat` resolves a genuine Python 3.11 interpreter, creates the project-root
+`.venv`, installs the declared development/build dependencies, runs `pip check` and
+the automated tests, then cleans generated test caches. The optional Windows `py`
+launcher is not required. Advanced users can still create and manage an equivalent
+Python 3.11 virtual environment manually.
 
 ### Optional features
 
@@ -95,7 +103,8 @@ and will tell you what is missing if you try to use one.
 
 | Feature | Python packages | External programs |
 |---|---|---|
-| Open Word / Excel | *(none)* | **Microsoft Office** (best fidelity) or **LibreOffice** |
+| Open Word / Excel via Microsoft Office | `pywin32` | **Microsoft Office** (best fidelity) |
+| Open Word / Excel via LibreOffice | *(none)* | **LibreOffice** |
 | Export pages to images | *(included)* | — |
 | Export to Word | `pdf2docx` | — |
 | Export to Excel | `tabula-py`, `openpyxl`, `pandas` | **Java** |
@@ -217,7 +226,7 @@ If a PDF is encrypted, you'll be prompted for the password on open.
 | Show/hide nav panel | `F4` |
 
 **Thumbnails** in the navigation panel jump to any page on click, and support
-drag-and-drop reordering (see §12).
+drag-and-drop reordering (see §13).
 
 **Bookmarks:** `Ctrl+B` or **Pages → Add Bookmark** bookmarks the current page.
 Use **+ Add** / **− Remove** in the Bookmarks section.
@@ -235,7 +244,7 @@ Use **+ Add** / **− Remove** in the Bookmarks section.
 Matches are highlighted on the page. Search covers the whole document.
 
 > If a scanned document returns no results, it has no text layer — run **OCR**
-> first (§15).
+> first (§16).
 
 ---
 
@@ -446,9 +455,11 @@ native Word-style editing.
    OCR currently uses Tesseract's English model; for other languages, type the
    replacement manually in the editor.
 4. Review the recognised text and type the corrected replacement.
-5. Adjust font size (**Auto fit** is the safest default), alignment, text colour,
+5. Adjust font size, alignment, text colour,
    and background colour. The initial background is sampled from the edge pixels
-   of the selected region.
+   of the selected region. **Auto fit** chooses the largest size that fits the
+   selected rectangle; choosing a numeric size applies that exact point size and
+   does not silently shrink it.
 6. Check the live replacement preview and choose an application mode.
 
 ### Reversible white-out overlay
@@ -835,8 +846,9 @@ and `pywin32`.
 
 See `NOTICE`, `THIRD_PARTY_NOTICES.md`, and the bundled `licenses` folder.
 
-> **Distribution gate:** the AGPL/GPL open-source strategy is selected. A public
-> binary remains blocked until exact locks and hashes, corresponding-source
-> delivery, clean Windows evidence, and final approval are recorded in
-> `release/release_policy.json`. `release_check.bat` enforces this gate. This is
-> an engineering safeguard, not legal advice.
+> **Distribution gate:** the AGPL/GPL open-source strategy is selected, and the
+> exact dependency locks, wheel hashes, packaged Windows build, manifest, diagnostics,
+> and 141-test Windows validation are complete. A public binary remains blocked until
+> clean Windows 10/11 evidence, matching corresponding-source release packaging, and
+> final approval are recorded in `release/release_policy.json`. `release_check.bat`
+> enforces this gate. This is an engineering safeguard, not legal advice.

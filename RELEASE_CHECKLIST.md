@@ -1,60 +1,79 @@
-# PDF Studio Release Candidate Checklist
+# PDF Studio 3.2.0-alpha12 - Release Candidate Checklist
 
-This checklist is required before `release_policy.json` may approve a public or
-family binary. Record evidence in `release/clean_machine_results.json` using the
-provided template.
+This checklist separates evidence already established on the validated Windows build
+from the remaining clean-machine and publication gates. Public binary approval in
+`release/release_policy.json` must remain `false` until the final section is complete.
 
-## Build provenance
+## Build provenance - complete
 
-- [ ] Python 3.11 clean environment created from the verified offline wheelhouse.
-- [ ] `tools/verify_wheelhouse.py` passed.
-- [ ] `pip check` passed.
-- [ ] Full pytest suite passed in the release environment.
-- [ ] `tools/release_audit.py --public-release --require-lock` passed.
-- [ ] `release/build_manifest.json` generated before PyInstaller.
-- [ ] `release/artifact_manifest.json` records the final executable SHA-256.
-- [ ] The exact source archive, locks, wheel manifest, and notices are archived.
+- [x] Python 3.11 clean `.buildenv` created from the verified offline wheelhouse.
+- [x] `tools/verify_wheelhouse.py` passed (18 wheelhouse files).
+- [x] `pip check` passed.
+- [x] Full Windows pytest suite passed: **141 passed**.
+- [x] Locked internal release audit passed.
+- [x] `release/build_manifest.json` generated before PyInstaller.
+- [x] PyInstaller completed successfully for Windows x86_64 / Python 3.11.
+- [x] `release/artifact_manifest.json` generated for the packaged executable.
+- [x] Runtime diagnostics report the expected bundled dependency versions.
+- [ ] Archive the exact corresponding-source release package paired to the final public executable.
 
-## Recovery-integrity validation
+## Recovery-integrity regression evidence - complete
 
-- [ ] Fault-inject a late sidecar commit failure and confirm complete rollback reports restored destinations.
-- [ ] Fault-inject both a late commit failure and an earlier destination-restoration failure.
-- [ ] Confirm PDF Studio shows **Save Rollback Incomplete**, preserves a recovery directory, and records `recovery_manifest.json`.
-- [ ] Confirm no success or preservation message is shown while rollback remains incomplete.
-- [ ] Confirm failed Office conversion leaves no fresh `pdfstudio_import_*.pdf` cache.
+The automated Windows suite covers staged/atomic save behavior, late commit failure,
+complete and incomplete rollback, durable recovery copies, recovery cleanup ownership,
+Office-import cache ownership, transactional redaction, and destination preservation.
 
-## Clean Windows 10 and Windows 11 tests
+- [x] Late sidecar/file-set commit failure rolls back earlier destinations.
+- [x] Incomplete rollback preserves recovery copies and reports failure rather than success.
+- [x] Every restoration is attempted when rollback is incomplete.
+- [x] Successful complete rollback removes its temporary recovery directory.
+- [x] Failed Office conversion removes only marker-owned temporary output.
+- [x] Redaction/save operations preserve existing destinations on prepare/validation failure.
 
-Perform every item on clean machines without Python, developer tools, or a
-preconfigured Tesseract PATH.
+## Clean Windows 10 and Windows 11 tests - still required
 
-- [ ] Splash appears, remains visible for the minimum interval, fades, and the main window opens.
-- [ ] Help > Diagnostics opens, reports the packaged build manifest, and opens the log folder.
-- [ ] An unhandled test failure is recorded in the rotating log without exposing document contents.
+Record evidence in `release/clean_machine_results.json` using the provided template.
+Test the final executable on clean machines without Python or developer tooling.
+
+- [ ] Windows 10: startup/splash and main window.
+- [ ] Windows 11: startup/splash and main window.
+- [ ] Diagnostics shows the packaged manifest and expected bundled versions.
 - [ ] Open, Save, Save As, Save a Copy, and close-with-unsaved-changes work.
-- [ ] Existing destination files survive simulated permission and late-validation failures.
-- [ ] Merge, split, extract, Office export, and image export cancel cleanly with no partial output.
-- [ ] Redactions cannot cross documents and apply transactionally.
-- [ ] Signature and stamp placement save exactly once and undo/redo correctly.
-- [ ] Insert, remove, move, and reorder preserve all page-bound state.
-- [ ] Existing forms fill, save, reopen, and flatten safely.
-- [ ] Form Designer and Smart Form Detection create persistent fields.
-- [ ] OCR detects a normal Tesseract install without editing PATH.
-- [ ] Scanned-text replacement works in reversible and permanent modes.
-- [ ] PDF-to-image export works for PNG and JPEG at 300 DPI.
-- [ ] Password-protected output contains visible application edits.
-- [ ] File associations register and unregister without administrator-only assumptions.
-- [ ] Third-party notices and licensing status are visible in Help.
-- [ ] Upgrade and uninstall preserve user documents and remove only application-owned files.
+- [ ] Notes, markup, sticky-note popup behavior, and undo/redo work.
+- [ ] Drawn and imported signatures place normally and snap into signature fields.
+- [ ] Drawn signature colour and thickness survive placement/save/reopen.
+- [ ] Responsive **More »** toolbar overflow keeps every command accessible.
+- [ ] Existing forms fill/save/reopen; Form Designer and Smart Form Detection work.
+- [ ] OCR detects a normal Tesseract install without PATH editing.
+- [ ] Scanned-text reversible/permanent replacement works, including exact numeric font size.
+- [ ] Redaction removes searchable content and does not cross document sessions.
+- [ ] Merge, split, extract, image export, and available Office import/export paths work.
+- [ ] File associations register/unregister as documented.
+- [ ] Third-party notices/licensing information is visible from Help.
+- [ ] User documents are never removed by cleanup/uninstall behavior.
+
+For each machine record edition/build, tested UTC, tester, final executable SHA-256,
+status, and notes.
 
 ## Distribution and legal sign-off
 
 - [x] PyMuPDF/MuPDF path documented: AGPL for official open-source builds.
-- [x] PyQt6 path documented: GPLv3 for official open-source builds; Qt terms remain preserved.
-- [x] Corresponding-source and notice delivery is defined in `LICENSING_STRATEGY.md`.
-- [x] `release/release_policy.json` records the selected strategy and licensing decision.
-- [ ] Final binary approver and UTC approval timestamp are recorded after all technical evidence passes.
-- [ ] Code signing / publisher identity is documented for the distributed executable or installer.
+- [x] PyQt6 path documented: GPLv3 for official open-source builds; Qt terms preserved.
+- [x] Corresponding-source and notice delivery requirements defined in `LICENSING_STRATEGY.md`.
+- [x] `release/release_policy.json` records the selected licensing strategy/decision.
+- [x] Exact dependency locks and wheel hashes are captured.
+- [x] Packaged Windows build/test evidence exists.
+- [ ] Matching corresponding-source release package is archived with the final binary.
+- [ ] Windows 10 clean-machine result is `passed`.
+- [ ] Windows 11 clean-machine result is `passed`.
+- [ ] Final binary approver and UTC approval timestamp are recorded.
+- [ ] `tools/release_audit.py --public-release --require-lock` passes.
+- [ ] `build_release.bat` completes against the approved release policy.
 
-A checked box is not evidence by itself. Store machine version, test date,
-artifact SHA-256, tester, result, and notes in the clean-machine results file.
+### Recommended, not currently enforced
+
+- [ ] Code-signing / publisher identity decision documented.
+- [ ] GitHub release notes link the binary to its exact source archive and SHA-256.
+
+A checked box is not evidence by itself; retain the corresponding manifests and
+clean-machine result records with the release.
